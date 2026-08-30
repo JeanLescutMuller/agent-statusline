@@ -9,13 +9,12 @@ bash tests/run.sh          # everything, ~20-60s (see below)
 bash tests/test_format.sh  # one file at a time; each is independently runnable
 ```
 
-Every test is hermetic: real temp git repos, a real local bare "remote", a
-temp `$HOME`, and `security`/`curl` stubs for the Keychain/network-facing
-usage-fetch script - nothing here touches your actual `~/.claude`, `~/.codex`,
-Keychain, or the network. `test_provider_codex.sh` is the slow one: the Codex
-adapter's carousel page is chosen from the real wall clock (not the payload),
-so a few sections poll for real, bounded at 13s each, to observe pages 1/2/3
-as they come up.
+Every test is hermetic: real temp git repos, a real local bare "remote", and
+a temp `$HOME` - nothing here touches your actual `~/.claude`, `~/.codex`, or
+`~/opt/agent-quota-tracker`. `test_provider_codex.sh` is the slow one: the
+Codex adapter's carousel page is chosen from the real wall clock (not the
+payload), so a few sections poll for real, bounded at 13s each, to observe
+pages 1/2/3 as they come up.
 
 ## What's intentionally not covered
 
@@ -25,10 +24,11 @@ as they come up.
   clauses (missing binary, unsupported version, missing patch file, and the
   important idempotent already-installed short-circuit) are covered in
   `test_codex_patch_guards.sh` without ever reaching that path.
-- Live Anthropic API calls or the real macOS Keychain -
-  `test_usage_fetch.sh` stubs both and also unit-tests the script's jq
-  epoch-parsing filter directly (extracted from the script, not retyped)
-  against fixture timestamps in the three formats the real API emits.
+- Live Anthropic API calls or the real macOS Keychain - neither is reachable
+  from this repo any more. Claude quota now comes from a fixture
+  agent-quota-tracker log (`test_refresh_claude_quota.sh`); the real Keychain
+  read lives in agent-quota-tracker's own `poll_claude.py`, a separate
+  project with its own test story.
 
 ## Files
 
@@ -40,7 +40,7 @@ as they come up.
 | `test_refresh_git_local.sh` | `lib/statusline-refresh-git-local.sh` against real temp repos |
 | `test_refresh_git_remote.sh` | `lib/statusline-refresh-git-remote.sh` against a real local bare remote |
 | `test_refresh_metrics.sh` | `lib/statusline-refresh-metrics.sh` on the real host |
-| `test_usage_fetch.sh` | `lib/statusline-usage-fetch.sh` - stubbed Keychain/curl + the epoch jq filter in isolation |
+| `test_refresh_claude_quota.sh` | `lib/statusline-refresh-claude-quota.sh` - reading a fixture agent-quota-tracker log, including the epoch-parsing filter's three timestamp formats |
 | `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end |
 | `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |
 | `test_install.sh` | `install.sh` - idempotency, legacy migration, Codex-absent skip, the real TOML-merge heredoc |

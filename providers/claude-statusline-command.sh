@@ -10,6 +10,13 @@ statusline_cache_init
 clock="$(date '+%s|%m/%d %H:%M:%S|%S')"
 IFS='|' read -r now datetime seconds <<< "$clock"
 
+# Liveness signal for agent-quota-tracker's dynamic poll cadence: it polls
+# Claude's quota faster while this file is fresh (a statusline is actively
+# rendering somewhere) and backs off once every session goes idle/closed.
+# Content doesn't matter, only mtime - a plain overwrite is fine, no lock.
+mkdir -p "$STATUSLINE_STATE_DIR/providers"
+printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/providers/claude.heartbeat" 2>/dev/null || true
+
 values=()
 while IFS= read -r -d '' value; do
     values+=("$value")
@@ -42,8 +49,8 @@ model_display="$model"
 [ -n "$effort" ] && model_display="$model ($effort)"
 
 quota_cache="$STATUSLINE_STATE_DIR/providers/claude"
-statusline_refresh_if_stale "$quota_cache" 60 claude-quota 8 5 "$now" \
-    bash "$HOME/.claude/statusline-usage-fetch.sh"
+statusline_refresh_if_stale "$quota_cache" 60 claude-quota 5 2 "$now" \
+    bash "$lib_dir/statusline-refresh-claude-quota.sh"
 if [ ! -f "$quota_cache" ]; then
     statusline_write_values_if_stale "$quota_cache" 60 claude-quota 8 "$now" \
         "$five_pct" "$five_reset" "$week_pct" "$week_reset"

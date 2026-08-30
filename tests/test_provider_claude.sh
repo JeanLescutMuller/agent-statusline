@@ -4,12 +4,13 @@
 # point at an isolated temp runtime, and a captured payload is piped in.
 #
 # HOME is also overridden per call. The script hardcodes
-# $HOME/.claude/statusline-usage-fetch.sh for its live quota refresh and
-# $HOME/opt/bootstrap-home/bin/get_host_color for the host color - pointing
-# HOME at an empty temp dir makes both misses deterministic (quota refresh
-# fails closed to the payload's own numbers; host color falls back to the
-# default) instead of quietly depending on what's installed on the machine
-# running the suite.
+# $HOME/opt/agent-quota-tracker/data/utilization-log.jsonl for its live quota
+# refresh (see lib/statusline-refresh-claude-quota.sh - test_refresh_claude_quota.sh
+# covers that script directly) and $HOME/opt/bootstrap-home/bin/get_host_color
+# for the host color - pointing HOME at an empty temp dir makes both misses
+# deterministic (quota refresh fails closed to the payload's own numbers;
+# host color falls back to the default) instead of quietly depending on what's
+# installed on the machine running the suite.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -74,6 +75,8 @@ run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 quota_cache="$STATUSLINE_RUNTIME_DIR/state/providers/claude"
 assert_file_exists "first call seeds the quota cache from the payload" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "55"
+assert_file_exists "every render touches the liveness heartbeat agent-quota-tracker polls faster against" \
+    "$STATUSLINE_RUNTIME_DIR/state/providers/claude.heartbeat"
 
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_contains "a later call with no rate_limits in the payload still shows the cached 5h percent" "$TH_OUT" "55%"

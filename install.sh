@@ -48,7 +48,6 @@ done
 
 step "provider adapters"
 _deploy "$SCRIPT_DIR/providers/claude-statusline-command.sh" "$HOME/.claude/statusline-command.sh"
-_deploy "$SCRIPT_DIR/lib/statusline-usage-fetch.sh" "$HOME/.claude/statusline-usage-fetch.sh"
 _deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
 
 step "runtime state"

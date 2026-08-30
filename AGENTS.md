@@ -60,12 +60,26 @@ file that reaches into both trees.
 color (falls back to a default if absent — not a hard dependency). That
 script is owned by `bootstrap-home`, not this repo.
 
+`lib/statusline-refresh-claude-quota.sh` reads the latest Claude reading from
+`~/opt/agent-quota-tracker/data/utilization-log.jsonl` instead of hitting
+Anthropic's OAuth usage endpoint itself — agent-quota-tracker already runs
+the single, fixed-cadence poller for that endpoint on this machine; polling
+it a second time here caused 429s during busy multi-session hours. Soft
+dependency, same pattern as `get_host_color`: if agent-quota-tracker isn't
+installed, the quota segment just falls back to the payload's own numbers.
+The coupling goes the other way too — `providers/claude-statusline-command.sh`
+touches `state/providers/claude.heartbeat` on every render specifically so
+agent-quota-tracker's `poll_claude.py` can tell a statusline is live and poll
+faster (see that project's `AGENTS.md`). Neither side breaks if the other is
+absent; they just fall back to their older, flatter behavior.
+
 ## Tests
 
 `bash tests/run.sh` before committing a change to `lib/`, `providers/`,
 `install.sh`, or `codex-patch/install-codex-statusline-patch.sh`. See
 `tests/README.md` for what the suite covers and what it deliberately doesn't
 (the real Codex `git clone` + `cargo build` path; live Anthropic/Keychain
-calls). It's hermetic — temp git repos, a temp `$HOME`, stubbed
-Keychain/curl — never touches this machine's real `~/.claude`, `~/.codex`,
-or account state.
+calls — the Keychain read now lives entirely in agent-quota-tracker's
+`poll_claude.py`, not in this repo). It's hermetic — temp git repos, a temp
+`$HOME`, a fixture agent-quota-tracker log — never touches this machine's
+real `~/.claude`, `~/.codex`, `~/opt/agent-quota-tracker`, or account state.

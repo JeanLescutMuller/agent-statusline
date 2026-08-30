@@ -40,7 +40,6 @@ flowchart TB
         libcache["lib/statusline-cache.sh"]
         libformat["lib/statusline-format.sh"]
         librefresh["lib/statusline-refresh-*.sh"]
-        libusage["lib/statusline-usage-fetch.sh"]
         provclaude["providers/claude-statusline-command.sh"]
         provcodex["providers/codex-statusline-command.sh"]
     end
@@ -60,7 +59,6 @@ flowchart TB
     installsh --> libcache
     installsh --> libformat
     installsh --> librefresh
-    installsh --> libusage
     installsh --> provclaude
     installsh --> provcodex
     installsh -->|"if codex on PATH"| patchinstall
@@ -73,7 +71,6 @@ flowchart TB
     provclaude --> libcache
     provclaude --> libformat
     provclaude --> librefresh
-    provclaude --> libusage
     provcodex --> libcache
     provcodex --> libformat
     provcodex --> librefresh
@@ -97,6 +94,7 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     state/static/host-color       immutable deterministic terminal color
     state/system/metrics          used GiB, total GiB, percent
     state/providers/claude        5h percent/reset, 7d percent/reset
+    state/providers/claude.heartbeat  epoch of the last Claude render (see below)
     state/providers/codex         5h percent/reset, 7d percent/reset
     state/git/cwd/.../local       local Git snapshot for that cwd
     state/git/cwd/.../remote      remote Git snapshot for that cwd
@@ -132,14 +130,31 @@ hot-path logger independent of another `date` subprocess.
 |---|---|---:|---:|
 | Hostname/color | machine | static | none |
 | Memory | machine | 30s | 1s |
-| Claude quotas | Claude account | 60s | 5s |
+| Claude quotas | Claude account | 60s | 2s |
 | Codex quotas | Codex account | 60s | payload update |
 | Local Git | exact cwd | 8s | 1s |
 | Remote Git | exact cwd | 30s | 1s |
 
-Claude quotas use the OAuth usage endpoint. Codex contributes its latest
-payload snapshot to the shared provider cache because no separate stable local
-quota endpoint has been established.
+Claude quotas are read from agent-quota-tracker's poll log
+(`~/opt/agent-quota-tracker/data/utilization-log.jsonl`), not fetched from
+Anthropic's OAuth usage endpoint directly — this repo used to poll that
+endpoint itself on the same 60s cache TTL, and running that opportunistically
+across every open session independently duplicated agent-quota-tracker's own
+fixed-cadence poll of the same endpoint, causing 429s during busy
+multi-session hours (see agent-quota-tracker's `AGENTS.md`). This repo's own
+60s TTL is now just how often it re-reads that local log file — cheap, and
+not itself a source of API traffic — while the actual quota freshness is
+bounded by how often agent-quota-tracker polls: roughly every 60s while a
+Claude Code statusline is rendering somewhere on the machine (this repo
+touches `state/providers/claude.heartbeat` on every render specifically so
+agent-quota-tracker can tell), backing off to roughly every 5 minutes once
+idle. Soft dependency: if agent-quota-tracker isn't installed, the quota
+segment just falls back to the payload's own numbers, same as any other
+failed refresh.
+
+Codex contributes its latest payload snapshot to the shared provider cache
+because no separate stable local quota endpoint has been established -
+`providers/codex-statusline-command.sh` makes no network call of its own.
 
 ## Codex status-line patch
 
@@ -174,7 +189,7 @@ Statusline architecture (runs on every render):
 - `lib/statusline-cache.sh`: paths, freshness, locking, timeouts, and atomic writes.
 - `lib/statusline-format.sh`: shared colors, bars, limits, and Git formatting.
 - `lib/statusline-refresh-*.sh`: one bounded refresh attempt, without cache policy.
-- `lib/statusline-usage-fetch.sh`: one Claude quota API attempt.
+- `lib/statusline-refresh-claude-quota.sh`: reads the latest Claude reading from agent-quota-tracker's poll log.
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout.
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
 - `install.sh` + `utils.sh`: deployment, legacy-runtime migration, and Codex config wiring.
