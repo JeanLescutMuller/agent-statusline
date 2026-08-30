@@ -23,6 +23,7 @@ agent-statusline/
 │   ├── install-codex-statusline-patch.sh   # clone/patch/build/deploy the Codex binary
 │   ├── codex_tui.toml       # template merged into ~/.codex/config.toml's [tui] table
 │   └── patches/              # codex-<version>-status-line-command.patch, per pinned version
+├── tests/                    # hermetic bash test suite, see tests/README.md
 └── TODO.md                  # deliberately postponed work
 ```
 
@@ -59,9 +60,12 @@ file that reaches into both trees.
 color (falls back to a default if absent — not a hard dependency). That
 script is owned by `bootstrap-home`, not this repo.
 
-## Offline testing
+## Tests
 
-Set `STATUSLINE_RUNTIME_DIR` to a temporary directory and `STATUSLINE_LIB_DIR`
-to this repository's `lib/` directory, then pipe a captured provider payload
-into the corresponding renderer under `providers/`. See `README.md`'s
-"Offline testing" section for the expected startup cost on a warm cache.
+`bash tests/run.sh` before committing a change to `lib/`, `providers/`,
+`install.sh`, or `codex-patch/install-codex-statusline-patch.sh`. See
+`tests/README.md` for what the suite covers and what it deliberately doesn't
+(the real Codex `git clone` + `cargo build` path; live Anthropic/Keychain
+calls). It's hermetic — temp git repos, a temp `$HOME`, stubbed
+Keychain/curl — never touches this machine's real `~/.claude`, `~/.codex`,
+or account state.

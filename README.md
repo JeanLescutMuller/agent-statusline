@@ -185,6 +185,16 @@ Codex patch (build-time, one-off; see "Codex status-line patch" above):
 - `codex-patch/patches/`: one `.patch` per supported Codex version.
 - `codex-patch/codex_tui.toml`: template merged into `~/.codex/config.toml`'s `[tui]` table.
 
+## Tests
+
+```bash
+bash tests/run.sh
+```
+
+A hermetic bash test suite covering every file above - see `tests/README.md`
+for what's covered and, deliberately, what isn't (the real Codex `git clone`
++ `cargo build` path, and live Anthropic/Keychain calls).
+
 ## Offline testing
 
 Set `STATUSLINE_RUNTIME_DIR` to a temporary directory and `STATUSLINE_LIB_DIR`
@@ -192,4 +202,4 @@ to this repository's `lib/` directory, then pipe a captured provider payload
 into the corresponding renderer. The first render may refresh stale data;
 subsequent Codex renders should start only Bash and one payload `jq`. That
 `jq` also supplies the refresh epoch used for cache freshness and carousel
-selection.
+selection. `tests/run.sh` automates exactly this pattern.

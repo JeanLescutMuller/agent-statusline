@@ -1,0 +1,8 @@
+{
+  "model": "codex-large",
+  "cwd": "__CWD__",
+  "thread_id": "thread-3",
+  "permissions": "Custom permissions",
+  "approval_mode": "Approve for me",
+  "context": {"used_percentage": 10}
+}

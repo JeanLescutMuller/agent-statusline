@@ -1,0 +1,16 @@
+{
+  "model": "codex-large",
+  "reasoning": "high",
+  "cwd": "__CWD__",
+  "project_name": "proj",
+  "thread_id": "thread-1",
+  "thread_title": "Fix the bug",
+  "run_state": "running",
+  "permissions": "Read Only",
+  "approval_mode": "Approve for me",
+  "context": {"used_percentage": 30},
+  "rate_limits": {
+    "five_hour": {"used_percentage": 20, "resets_at": "2026-08-30T10:00:00Z"},
+    "weekly": {"used_percentage": 45, "resets_at": "2026-09-05T00:00:00Z"}
+  }
+}

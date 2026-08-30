@@ -211,7 +211,13 @@ statusline_read_static() {
 }
 
 statusline_git_cache_paths() {
-    local cwd="$1" cache_dir="$STATUSLINE_STATE_DIR/git/cwd${cwd}"
+    # Two separate `local` statements, deliberately: a single
+    # `local cwd="$1" cache_dir="...${cwd}"` expands every word before any
+    # assignment takes effect, so ${cwd} would read the *caller's* cwd (or be
+    # unbound under `set -u`), not $1 - it only "worked" before because every
+    # caller happened to already have an outer variable named cwd.
+    local cwd="$1"
+    local cache_dir="$STATUSLINE_STATE_DIR/git/cwd${cwd}"
 
     STATUSLINE_GIT_ROOT="$cwd"
     STATUSLINE_GIT_KEY="cwd${cwd//\//-}"
