@@ -20,6 +20,74 @@ provider adapters, migrates in-place from a legacy
 if `codex` is on `PATH` - builds/deploys the status-line-command patch and
 wires `~/.codex/config.toml`.
 
+## Architecture
+
+Two independent mandates share this repo:
+
+- **Statusline architecture** — `lib/` + `providers/`, deployed by `install.sh`
+  and invoked on every render by Claude Code / Codex. This is the runtime
+  path: shared cache, formatting, and per-provider adapters.
+- **Codex patch** — `codex-patch/`, invoked once by `install.sh` (only when
+  `codex` is on `PATH`) to give Codex's TUI a `status_line_command` extension
+  point it doesn't ship with on the pinned version. Build-time only; nothing
+  in it runs on a render.
+
+```mermaid
+flowchart TB
+    subgraph arch["Statusline architecture — runs every render"]
+        direction TB
+        installsh["install.sh + utils.sh"]
+        libcache["lib/statusline-cache.sh"]
+        libformat["lib/statusline-format.sh"]
+        librefresh["lib/statusline-refresh-*.sh"]
+        libusage["lib/statusline-usage-fetch.sh"]
+        provclaude["providers/claude-statusline-command.sh"]
+        provcodex["providers/codex-statusline-command.sh"]
+    end
+
+    subgraph patch["codex-patch/ — build-time, one-off"]
+        direction TB
+        patchinstall["install-codex-statusline-patch.sh"]
+        patchfiles["patches/codex-version.patch"]
+        patchtoml["codex_tui.toml"]
+    end
+
+    upstream["openai/codex repo, pinned commit"]
+    codexbin["~/.codex/packages/standalone/current"]
+    claudecode(["Claude Code"])
+    codextui(["Codex TUI, patched binary"])
+
+    installsh --> libcache
+    installsh --> libformat
+    installsh --> librefresh
+    installsh --> libusage
+    installsh --> provclaude
+    installsh --> provcodex
+    installsh -->|"if codex on PATH"| patchinstall
+    installsh -->|"merges [tui] keys into config.toml"| patchtoml
+
+    patchinstall --> patchfiles
+    patchinstall --> upstream
+    patchinstall --> codexbin
+
+    provclaude --> libcache
+    provclaude --> libformat
+    provclaude --> librefresh
+    provclaude --> libusage
+    provcodex --> libcache
+    provcodex --> libformat
+    provcodex --> librefresh
+
+    claudecode -->|"renders statusline"| provclaude
+    codextui -->|"status_line_command every 4s"| provcodex
+```
+
+`install.sh` is the only thing that crosses both mandates: it deploys the
+statusline architecture unconditionally, then conditionally drives the Codex
+patch. Nothing under `codex-patch/` is sourced by `lib/` or `providers/`, and
+nothing under `lib/`/`providers/` is sourced by `codex-patch/` — the two
+trees don't call into each other at runtime.
+
 ## Runtime layout
 
 Deploys shared code and state under `~/opt/agent-statusline/`:
@@ -76,12 +144,14 @@ quota endpoint has been established.
 ## Codex status-line patch
 
 Codex's TUI does not natively support a `status_line_command` the way this
-project needs, on the supported pinned version. `install.sh` calls
-`scripts/install-codex-statusline-patch.sh`, which:
+project needs, on the supported pinned version. Everything for this lives in
+`codex-patch/`, self-contained and separate from the statusline architecture
+above. `install.sh` calls `codex-patch/install-codex-statusline-patch.sh`,
+which:
 
 - Clones `openai/codex` at the pinned commit for the installed Codex version
   (currently only 0.150.1 is supported; other versions are left unpatched).
-- Applies `patches/codex-<version>-status-line-command.patch`.
+- Applies `codex-patch/patches/codex-<version>-status-line-command.patch`.
 - Builds a release binary with Cargo and deploys it as a
   `~/.codex/packages/standalone/releases/...` release, symlinked from
   `current`.
@@ -93,10 +163,13 @@ Verbose clone/patch/compiler output is captured in
 terminal - only milestones and the final result print.
 
 `install.sh` then owns just the `[tui]` status-line keys (`status_line`,
-`status_line_use_colors`, `status_line_command`) in `~/.codex/config.toml` via
-a `python3`/`tomllib` merge, touching nothing else in that file.
+`status_line_use_colors`, `status_line_command`) in `~/.codex/config.toml`,
+merging in `codex-patch/codex_tui.toml` via a `python3`/`tomllib` merge that
+touches nothing else in that file.
 
 ## Source files
+
+Statusline architecture (runs on every render):
 
 - `lib/statusline-cache.sh`: paths, freshness, locking, timeouts, and atomic writes.
 - `lib/statusline-format.sh`: shared colors, bars, limits, and Git formatting.
@@ -104,8 +177,13 @@ a `python3`/`tomllib` merge, touching nothing else in that file.
 - `lib/statusline-usage-fetch.sh`: one Claude quota API attempt.
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout.
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
-- `scripts/install-codex-statusline-patch.sh` + `patches/`: Codex binary patch build.
-- `install.sh`: deployment, legacy-runtime migration, and Codex config wiring.
+- `install.sh` + `utils.sh`: deployment, legacy-runtime migration, and Codex config wiring.
+
+Codex patch (build-time, one-off; see "Codex status-line patch" above):
+
+- `codex-patch/install-codex-statusline-patch.sh`: clone/patch/build/deploy the binary.
+- `codex-patch/patches/`: one `.patch` per supported Codex version.
+- `codex-patch/codex_tui.toml`: template merged into `~/.codex/config.toml`'s `[tui]` table.
 
 ## Offline testing
 

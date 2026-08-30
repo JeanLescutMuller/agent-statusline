@@ -66,7 +66,7 @@ fi
 
 step "codex status-line patch"
 if command -v codex >/dev/null 2>&1; then
-    if bash "$SCRIPT_DIR/scripts/install-codex-statusline-patch.sh"; then
+    if bash "$SCRIPT_DIR/codex-patch/install-codex-statusline-patch.sh"; then
         ok "Codex status-line patch"
     else
         fail "Codex status-line patch"
@@ -77,7 +77,7 @@ fi
 
 step "codex config"
 CONFIG="$HOME/.codex/config.toml"
-DESIRED="$SCRIPT_DIR/files/codex_tui.toml"
+DESIRED="$SCRIPT_DIR/codex-patch/codex_tui.toml"
 
 if ! command -v python3 >/dev/null 2>&1; then
     fail "Codex status line (python3 not found)"

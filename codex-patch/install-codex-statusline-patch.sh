@@ -3,7 +3,7 @@
 # Verbose clone/patch/compiler output stays out of the terminal and in BUILD_LOG.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 RUNTIME="${CODEX_PATCH_RUNTIME:-$HOME/opt/agent-statusline/codex-patch}"
 BUILD_LOG="$RUNTIME/build.log"
 CODEX_BIN="${CODEX_BIN:-$HOME/.local/bin/codex}"
