@@ -49,6 +49,7 @@ done
 step "provider adapters"
 _deploy "$SCRIPT_DIR/providers/claude-statusline-command.sh" "$HOME/.claude/statusline-command.sh"
 _deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
+rm -f "$HOME/.claude/statusline-usage-fetch.sh"  # stale pre-2026-08-30 helper, replaced by lib/statusline-refresh-claude-quota.sh
 
 step "runtime state"
 if [ -d "$LEGACY_RUNTIME" ] && [ ! -d "$RUNTIME/state" ]; then

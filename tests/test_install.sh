@@ -60,6 +60,16 @@ assert_file_exists "logs moved to the new runtime dir" "$th_home/opt/agent-statu
 assert_file_missing "the legacy runtime dir is gone" "$legacy"
 rm -rf "$th_home"
 
+section "orphaned pre-2026-08-30 usage-fetch helper is removed"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/.claude"
+printf 'stale\n' > "$th_home/.claude/statusline-usage-fetch.sh"
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_file_missing "the orphaned helper is cleaned up, replaced by the shared lib's refresh script" \
+    "$th_home/.claude/statusline-usage-fetch.sh"
+rm -rf "$th_home"
+
 section "Codex [tui] config merge (the real heredoc, extracted, not retyped)"
 merge_script="$(mktemp "${TMPDIR:-/tmp}/th-merge.XXXXXX.py")"
 awk '/<<.PY.$/{flag=1; next} /^PY$/{flag=0} flag' "$INSTALL" > "$merge_script"
