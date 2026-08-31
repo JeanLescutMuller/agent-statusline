@@ -3,8 +3,10 @@
 #
 # Deploys the shared cache/format library and the Claude/Codex provider
 # adapters, migrates any pre-existing bootstrap-home statusline runtime state,
-# and - when Codex is installed - builds/deploys the status-line-command
-# patch and wires ~/.codex/config.toml's [tui] status-line keys.
+# deploys the quota-tracking pollers (folded in from the former
+# agent-quota-tracker repo - see quota/AGENTS.md) and their LaunchAgent, and -
+# when Codex is installed - builds/deploys the status-line-command patch and
+# wires ~/.codex/config.toml's [tui] status-line keys.
 #
 # Depends on bootstrap-home's ~/opt/bootstrap-home/bin/get_host_color being on
 # disk (used by the cache library for a deterministic per-host color); its
@@ -14,9 +16,13 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/utils.sh"
 
+command -v python3 >/dev/null 2>&1 || { echo "python3 not found on PATH"; exit 1; }
+PYTHON3="$(command -v python3)"
+
 RUNTIME="$HOME/opt/agent-statusline"
 LIB_DIR="$RUNTIME/lib"
 LEGACY_RUNTIME="$HOME/opt/bootstrap-home/statusline"
+LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN} agent-statusline install${NC}"
@@ -64,6 +70,79 @@ else
     ok "runtime state"
 fi
 
+step "quota tracker"
+mkdir -p "$RUNTIME/quota" "$RUNTIME/data"
+for f in "$SCRIPT_DIR"/quota/*.py; do
+    _deploy "$f" "$RUNTIME/quota/$(basename "$f")"
+done
+
+# One-time: fold in agent-quota-tracker's live deployment. Its own
+# install.sh had this exact migrate_legacy() idiom for its four prior
+# renames; this applies the same pattern once more, across repos instead of
+# within one (see AGENTS.md's "Quota tracking" section). Booting out its
+# LaunchAgent here isn't optional: leaving it running alongside the one
+# below would mean two independent callers of GET /api/oauth/usage again -
+# the exact problem this merge exists to eliminate.
+OLD_QUOTA_FOLDER="$HOME/opt/agent-quota-tracker"
+OLD_QUOTA_LABEL="com.jeanlescut.agent-quota-tracker"
+if [ -d "$OLD_QUOTA_FOLDER" ]; then
+    launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENTS/$OLD_QUOTA_LABEL.plist" 2>/dev/null || true
+    rm -f "$LAUNCH_AGENTS/$OLD_QUOTA_LABEL.plist"
+    if [ -d "$OLD_QUOTA_FOLDER/data" ]; then
+        cp -n "$OLD_QUOTA_FOLDER/data/"* "$RUNTIME/data/" 2>/dev/null || true
+    fi
+    rm -rf "$OLD_QUOTA_FOLDER"
+    installed "migrated from ~/opt/agent-quota-tracker (data/ carried forward, old LaunchAgent booted out)"
+fi
+
+QUOTA_LABEL="com.jeanlescut.agent-statusline"
+QUOTA_REAL_PLIST="$RUNTIME/$QUOTA_LABEL.plist"
+QUOTA_LINK_PLIST="$LAUNCH_AGENTS/$QUOTA_LABEL.plist"
+mkdir -p "$LAUNCH_AGENTS"
+tee "$QUOTA_REAL_PLIST" >/dev/null <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$QUOTA_LABEL</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$PYTHON3</string>
+        <string>$RUNTIME/quota/poll_all.py</string>
+    </array>
+
+    <!-- Tick every 60s - NOT the same as polling every 60s. Both pollers
+         self-throttle most of these ticks away (see each one's module
+         docstring): poll_claude.py polls every tick while a Claude Code
+         statusline is live, settling to ~5 min once idle; poll_codex.py
+         always settles to ~5 min. -->
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <!-- Take a reading immediately when the job is loaded, i.e. at login and
+         every time this script re-bootstraps it. Does NOT address sleep
+         gaps: StartInterval doesn't fire while the Mac is asleep, though
+         launchd does fire once on wake. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$RUNTIME/logs/quota-poll.log</string>
+    <key>StandardErrorPath</key>
+    <string>$RUNTIME/logs/quota-poll.err</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
+PLIST
+ln -sf "$QUOTA_REAL_PLIST" "$QUOTA_LINK_PLIST"
+launchctl bootout "gui/$(id -u)" "$QUOTA_LINK_PLIST" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$QUOTA_LINK_PLIST"
+installed "quota poll LaunchAgent (ticks every 60s, both pollers self-throttle)"
+
 step "codex status-line patch"
 if command -v codex >/dev/null 2>&1; then
     if bash "$SCRIPT_DIR/codex-patch/install-codex-statusline-patch.sh"; then
@@ -79,12 +158,10 @@ step "codex config"
 CONFIG="$HOME/.codex/config.toml"
 DESIRED="$SCRIPT_DIR/codex-patch/codex_tui.toml"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    fail "Codex status line (python3 not found)"
-elif ! command -v codex >/dev/null 2>&1; then
+if ! command -v codex >/dev/null 2>&1; then
     skip "Codex status line (Codex not installed)"
 else
-CODEX_CONFIG="$CONFIG" CODEX_DESIRED="$DESIRED" python3 <<'PY'
+CODEX_CONFIG="$CONFIG" CODEX_DESIRED="$DESIRED" "$PYTHON3" <<'PY'
 import os
 import re
 import sys
