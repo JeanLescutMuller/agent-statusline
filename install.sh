@@ -76,6 +76,17 @@ for f in "$SCRIPT_DIR"/adhoc_quotas_analysis/*.py; do
     _deploy "$f" "$RUNTIME/adhoc_quotas_analysis/$(basename "$f")"
 done
 
+# One-time: agent-statusline itself renamed its quota/ deploy dir to
+# adhoc_quotas_analysis/ (see adhoc_quotas_analysis/AGENTS.md's "Naming
+# history") - clean up the orphaned old dir left behind by any prior install.
+# Purely cosmetic (the LaunchAgent plist below is rewritten from scratch
+# every run and already points at the new path), but nothing else will ever
+# remove it otherwise.
+if [ -d "$RUNTIME/quota" ]; then
+    rm -rf "$RUNTIME/quota"
+    installed "removed orphaned $RUNTIME/quota (renamed to adhoc_quotas_analysis/)"
+fi
+
 # One-time: fold in agent-quota-tracker's live deployment. Its own
 # install.sh had this exact migrate_legacy() idiom for its four prior
 # renames; this applies the same pattern once more, across repos instead of

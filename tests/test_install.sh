@@ -101,6 +101,22 @@ assert_not_contains "no migration message on a second run - old folder is alread
     "$TH_OUT" "migrated from ~/opt/agent-quota-tracker"
 rm -rf "$th_home"
 
+section "removes an orphaned pre-rename quota/ deploy dir"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/opt/agent-statusline/quota"
+printf 'stale\n' > "$th_home/opt/agent-statusline/quota/poll_claude.py"
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "reports the cleanup" "$TH_OUT" "removed orphaned"
+assert_file_missing "the orphaned dir is gone" "$th_home/opt/agent-statusline/quota"
+assert_file_exists "the new dir is deployed instead" \
+    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_not_contains "no cleanup message on a second run - old dir is already gone" \
+    "$TH_OUT" "removed orphaned"
+rm -rf "$th_home"
+
 section "renames a pre-existing data/utilization-log.jsonl to quota-log.jsonl"
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
 mkdir -p "$th_home/opt/agent-statusline/data"
