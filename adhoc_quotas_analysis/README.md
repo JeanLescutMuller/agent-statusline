@@ -121,7 +121,7 @@ fall back on:
 | Tier | Claude | Codex |
 |---|---|---|
 | **Local data is fresher than any poll** | *(no equivalent - Claude's rate-limit state is never written to disk on its own, see below)* | A local session `.jsonl` under `~/.codex/sessions/` was modified within the last 300s (a turn just completed, writing a fresh `rate_limits` snapshot via the `token_count` event) → **skip the poll entirely**. |
-| **Someone's watching, but no fresher local signal** | `claude.heartbeat` is fresh (any render, whether or not you're actively prompting) → poll every tick (~60s) | `codex.heartbeat` is fresh and the tier above didn't already skip (idle session left open) → poll every tick (~60s) - must equal the LaunchAgent's own tick exactly, not just be close to it (see `poll_codex.py`'s docstring for why) |
+| **Someone's watching, but no fresher local signal** | `heartbeat/claude` is fresh (any render, whether or not you're actively prompting) → poll every tick (~60s) | `heartbeat/codex` is fresh and the tier above didn't already skip (idle session left open) → poll every tick (~60s) - must equal the LaunchAgent's own tick exactly, not just be close to it (see `poll_codex.py`'s docstring for why) |
 | **Idle backstop** | Poll only if the last logged reading is ≥300s old (~5 min cadence) | Same, ≥300s |
 
 Both heartbeat files are the same mechanism (`../providers/claude-statusline-command.sh`

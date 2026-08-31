@@ -64,11 +64,11 @@ flowchart TB
 
     subgraph state["~/opt/agent-statusline/state/ — shared cache files"]
         direction LR
-        hbC[("providers/claude.heartbeat")]
-        hbX[("providers/codex.heartbeat")]
-        ccC[("providers/claude
+        hbC[("heartbeat/claude")]
+        hbX[("heartbeat/codex")]
+        ccC[("quota/claude
         60s fallback cache")]
-        ccX[("providers/codex
+        ccX[("quota/codex
         60s cache")]
         ccOther[("system/metrics, git/&lt;cwd&gt;/*, static/*
         shared by both providers")]
@@ -151,11 +151,12 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     │   │   └── host-color                immutable deterministic terminal color
     │   ├── system/
     │   │   └── metrics                   used GiB, total GiB, percent
-    │   ├── providers/
+    │   ├── heartbeat/
+    │   │   ├── claude                    epoch of the last Claude render (see below)
+    │   │   └── codex                     epoch of the last Codex render (see below)
+    │   ├── quota/
     │   │   ├── claude                    5h percent/reset, 7d percent/reset
-    │   │   ├── claude.heartbeat          epoch of the last Claude render (see below)
-    │   │   ├── codex                     5h percent/reset, 7d percent/reset
-    │   │   └── codex.heartbeat           epoch of the last Codex render (see below)
+    │   │   └── codex                     5h percent/reset, 7d percent/reset
     │   └── git/cwd/.../
     │       ├── local                     local Git snapshot for that cwd
     │       └── remote                    remote Git snapshot for that cwd
@@ -227,7 +228,7 @@ genuinely different persistence properties:
 | `source` | Writer | Cadence | Why it exists |
 |---|---|---|---|
 | `claude` | `adhoc_quotas_analysis/poll_claude.py` (LaunchAgent, `GET /api/oauth/usage`) | ~60s while a statusline is live, ~5min idle | That endpoint has no history - a missed reading is permanently lost. Unreliable (~21% 429 rate historically; can lock out for 3+ days - see `adhoc_quotas_analysis/AGENTS.md`). |
-| `codex` | `adhoc_quotas_analysis/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`codex.heartbeat`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
+| `codex` | `adhoc_quotas_analysis/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`heartbeat/codex`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
 | `claude_statusline` | `lib/statusline-push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
 
 Every `claude`/`codex` row also feeds `analysis.ipynb`'s research into what

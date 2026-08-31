@@ -55,7 +55,7 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 # See the module docstring for the gating rationale.
-HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "providers" / "claude.heartbeat"
+HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "heartbeat" / "claude"
 ACTIVE_WINDOW_SECONDS = 90
 IDLE_INTERVAL_SECONDS = 300
 

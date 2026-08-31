@@ -14,8 +14,8 @@ IFS='|' read -r now datetime seconds <<< "$clock"
 # Claude's quota faster while this file is fresh (a statusline is actively
 # rendering somewhere) and backs off once every session goes idle/closed.
 # Content doesn't matter, only mtime - a plain overwrite is fine, no lock.
-mkdir -p "$STATUSLINE_STATE_DIR/providers"
-printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/providers/claude.heartbeat" 2>/dev/null || true
+mkdir -p "$STATUSLINE_STATE_DIR/heartbeat"
+printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/heartbeat/claude" 2>/dev/null || true
 
 values=()
 while IFS= read -r -d '' value; do
@@ -63,7 +63,7 @@ fi
 model_display="$model"
 [ -n "$effort" ] && model_display="$model ($effort)"
 
-quota_cache="$STATUSLINE_STATE_DIR/providers/claude"
+quota_cache="$STATUSLINE_STATE_DIR/quota/claude"
 statusline_refresh_if_stale "$quota_cache" 60 claude-quota 5 2 "$now" \
     bash "$lib_dir/statusline-refresh-claude-quota.sh"
 if [ ! -f "$quota_cache" ]; then

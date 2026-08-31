@@ -118,13 +118,13 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   of polling at all (`source: "claude_statusline"` rows — this poller's own
   `source: "claude"` rows are a fallback now, not the primary path).
 - `poll_codex.py` self-throttles in three tiers (the middle one added
-  2026-08-31, alongside `codex.heartbeat` in `providers/codex-statusline-command.sh`
+  2026-08-31, alongside `heartbeat/codex` in `providers/codex-statusline-command.sh`
   - same repo now, see the root `AGENTS.md`'s "Quota tracking" section): (1)
   **skips** a tick outright if any `~/.codex/sessions/**/*.jsonl` file was
   modified in the last 5 minutes, because an active Codex session already
   writes its own `rate_limits` snapshot to that file on every turn (the
   `token_count` event — see "Correction" above and `recompute_codex_events.py`),
-  fresher than a poll would get anyway; (2) otherwise, if `codex.heartbeat`
+  fresher than a poll would get anyway; (2) otherwise, if `heartbeat/codex`
   is fresh (a Codex statusline is open and idle - tier 1 already handles
   the not-idle case), polls at the LaunchAgent's own tick (60s) - the exact
   equality matters, see `poll_codex.py`'s docstring; (3) otherwise, falls
@@ -189,7 +189,7 @@ This is the single most important design decision in this repo — don't
   tiers, not two: **skips** a tick if any local `~/.codex/sessions/**/*.jsonl`
   file was modified in the last 5 minutes, since an active session already
   writes a fresher `rate_limits` snapshot there itself; otherwise polls at
-  the LaunchAgent's own tick (~60s) while `codex.heartbeat` is fresh (a
+  the LaunchAgent's own tick (~60s) while `heartbeat/codex` is fresh (a
   statusline is open and idle); otherwise settles to the same ~5-minute
   idle cadence as the Claude side (see "Repo ↔ deploy layout" above and its
   own module docstring). Spawns `codex app-server --stdio` and speaks JSON-RPC

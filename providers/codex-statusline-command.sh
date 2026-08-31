@@ -52,18 +52,18 @@ page=$((now / 4 % 3 + 1))
 # Liveness signal for adhoc_quotas_analysis/poll_codex.py's watched-vs-idle poll cadence:
 # faster (60s, matching the LaunchAgent's own tick) while this file is fresh
 # and no local session file is fresher still, backing off to the flat idle
-# cadence otherwise - same shape as claude.heartbeat, see
+# cadence otherwise - same shape as heartbeat/claude, see
 # lib/statusline-push-claude-quota.sh's sibling logic in
 # claude-statusline-command.sh for why "someone is watching" matters even
 # when nothing local changed: other sessions/devices on the account can
 # still move the meter. Content doesn't matter, only mtime.
-mkdir -p "$STATUSLINE_STATE_DIR/providers"
-printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/providers/codex.heartbeat" 2>/dev/null || true
+mkdir -p "$STATUSLINE_STATE_DIR/heartbeat"
+printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/heartbeat/codex" 2>/dev/null || true
 
 model_display="$model"
 [ -n "$reasoning" ] && model_display="$model ($reasoning)"
 
-quota_cache="$STATUSLINE_STATE_DIR/providers/codex"
+quota_cache="$STATUSLINE_STATE_DIR/quota/codex"
 if [ -n "$payload_five_pct" ] || [ -n "$payload_week_pct" ]; then
     statusline_write_values_if_stale "$quota_cache" 60 codex-quota 4 "$now" \
         "$payload_five_pct" "$payload_five_reset" "$payload_week_pct" "$payload_week_reset"

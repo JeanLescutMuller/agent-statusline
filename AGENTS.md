@@ -88,7 +88,7 @@ are a *fallback* for the one gap the push path can't cover — a session that
 hasn't sent its first message yet, or a machine-wide idle stretch with no
 statusline rendering anywhere at all.
 
-`providers/claude-statusline-command.sh` touches `state/providers/claude.heartbeat`
+`providers/claude-statusline-command.sh` touches `state/heartbeat/claude`
 on every render specifically so `adhoc_quotas_analysis/poll_claude.py` can tell a statusline
 is live and poll faster (see `adhoc_quotas_analysis/AGENTS.md`'s "Architecture" section) —
 this is the one piece of the old cross-repo coupling that's still real,

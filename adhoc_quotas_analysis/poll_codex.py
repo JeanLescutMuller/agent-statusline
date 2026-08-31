@@ -34,8 +34,8 @@ has no equivalent of:
    equivalent tier - Claude Code's in-memory rate-limit state is never
    written to disk on its own (see agent-statusline's push script), so
    polling is Claude's *only* source of truth even mid-session.
-2. Otherwise, providers/codex-statusline-command.sh's codex.heartbeat file
-   (same repo, same shape as claude.heartbeat) is fresh within
+2. Otherwise, providers/codex-statusline-command.sh's heartbeat/codex file
+   (same repo, same shape as heartbeat/claude) is fresh within
    HEARTBEAT_ACTIVE_WINDOW_SECONDS - a statusline is open and idle, so the
    local file above is stale, but someone is watching and other
    sessions/devices on the account can still move the meter. Poll at
@@ -68,7 +68,7 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 QUOTA_LOG_FILE = DATA_DIR / "quota-log.jsonl"
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
-HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "providers" / "codex.heartbeat"
+HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "heartbeat" / "codex"
 
 # See the module docstring for the three-tier gating these constants drive.
 SESSION_FRESH_SECONDS = 300
@@ -225,7 +225,7 @@ def _codex_session_recently_active(now: float) -> bool:
 def _is_watched(now: float) -> bool:
     """Is a Codex statusline rendering somewhere right now? Same shape as
     poll_claude.py's _is_active(), reading providers/codex-statusline-command.sh's
-    heartbeat file instead of claude.heartbeat. A missing file (statusline
+    heartbeat file instead of heartbeat/claude. A missing file (statusline
     not installed, or never rendered) just means this is always False, which
     degrades gracefully to the flat idle cadence in main()."""
     try:

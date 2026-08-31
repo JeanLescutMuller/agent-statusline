@@ -72,11 +72,11 @@ section "quota cache write-through and reuse"
 # sections above.
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime2.XXXXXX")"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
-quota_cache="$STATUSLINE_RUNTIME_DIR/state/providers/claude"
+quota_cache="$STATUSLINE_RUNTIME_DIR/state/quota/claude"
 assert_file_exists "first call seeds the quota cache from the payload" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "55"
 assert_file_exists "every render touches the liveness heartbeat adhoc_quotas_analysis/poll_claude.py polls faster against" \
-    "$STATUSLINE_RUNTIME_DIR/state/providers/claude.heartbeat"
+    "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
 
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_contains "a later call with no rate_limits in the payload still shows the cached 5h percent" "$TH_OUT" "55%"
