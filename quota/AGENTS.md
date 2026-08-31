@@ -117,7 +117,29 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   `rate_limits` reading directly into `data/utilization-log.jsonl` instead
   of polling at all (`source: "claude_statusline"` rows — this poller's own
   `source: "claude"` rows are a fallback now, not the primary path).
-- `poll_codex.py` self-throttles the *opposite* direction (added 2026-08-30): it **skips** a tick outright if any `~/.codex/sessions/**/*.jsonl` file was modified in the last 5 minutes, because an active Codex session already writes its own `rate_limits` snapshot to that file on every turn (the `token_count` event — see "Correction" above and `recompute_codex_events.py`), fresher than a poll would get anyway. Once no session file is that fresh, it falls back to the same flat ~5-minute cadence the Claude side uses while idle. Don't confuse the two directions: Claude speeds up when active because polling is the *only* source of truth there; Codex skips when active because polling would be redundant with a free local source. One consequence worth knowing before you go looking for a bug: `data/utilization-log.jsonl`'s `source: "codex"` rows will show gaps during exactly the periods of heaviest Codex use — that's by design, not lost coverage; the trajectory for those periods lives in `data/codex-token-events.jsonl` instead (not yet merged into `analysis.ipynb` — see Natural next steps).
+- `poll_codex.py` self-throttles in three tiers (the middle one added
+  2026-08-31, alongside `codex.heartbeat` in `providers/codex-statusline-command.sh`
+  - same repo now, see the root `AGENTS.md`'s "Quota tracking" section): (1)
+  **skips** a tick outright if any `~/.codex/sessions/**/*.jsonl` file was
+  modified in the last 5 minutes, because an active Codex session already
+  writes its own `rate_limits` snapshot to that file on every turn (the
+  `token_count` event — see "Correction" above and `recompute_codex_events.py`),
+  fresher than a poll would get anyway; (2) otherwise, if `codex.heartbeat`
+  is fresh (a Codex statusline is open and idle - tier 1 already handles
+  the not-idle case), polls at the LaunchAgent's own tick (60s) - the exact
+  equality matters, see `poll_codex.py`'s docstring; (3) otherwise, falls
+  back to the same flat ~5-minute cadence the Claude side uses once nothing
+  is open at all. Don't confuse tier 1's direction with Claude's: Claude
+  speeds up when active because polling is the *only* source of truth
+  there; Codex skips when active because polling would be redundant with a
+  free local source - tier 2 is where the two pollers actually converge,
+  both speeding up for the same "someone's watching" reason. One
+  consequence worth knowing before you go looking for a bug:
+  `data/utilization-log.jsonl`'s `source: "codex"` rows will still show
+  gaps during exactly the periods of heaviest Codex use — that's by design
+  (tier 1), not lost coverage; the trajectory for those periods lives in
+  `data/codex-token-events.jsonl` instead (not yet merged into
+  `analysis.ipynb` — see Natural next steps).
 
 ## Naming history (in case anything still references an old name)
 
@@ -154,13 +176,14 @@ This is the single most important design decision in this repo — don't
   polled: the endpoint has no history, so a missed reading is permanently
   lost - the self-throttling only skips ticks it judges unnecessary, it
   never disables polling outright.
-- **`poll_codex.py`** — same rationale, same file, `source: "codex"`. Also
-  settles to roughly every 5 minutes idle, but the self-throttle direction
-  is inverted from the Claude side: it **skips** a tick if any local
-  `~/.codex/sessions/**/*.jsonl` file was modified in the last 5 minutes,
-  since an active session already writes a fresher `rate_limits` snapshot
-  there itself (see "Repo ↔ deploy layout" above and its own module
-  docstring). Spawns `codex app-server --stdio` and speaks JSON-RPC
+- **`poll_codex.py`** — same rationale, same file, `source: "codex"`. Three
+  tiers, not two: **skips** a tick if any local `~/.codex/sessions/**/*.jsonl`
+  file was modified in the last 5 minutes, since an active session already
+  writes a fresher `rate_limits` snapshot there itself; otherwise polls at
+  the LaunchAgent's own tick (~60s) while `codex.heartbeat` is fresh (a
+  statusline is open and idle); otherwise settles to the same ~5-minute
+  idle cadence as the Claude side (see "Repo ↔ deploy layout" above and its
+  own module docstring). Spawns `codex app-server --stdio` and speaks JSON-RPC
   (`initialize`, `account/rateLimits/read`, `account/usage/read`) instead
   of a plain HTTP GET, since that's the only interface Codex exposes for
   this. Logs the raw `account/*` results under

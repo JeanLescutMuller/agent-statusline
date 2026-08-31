@@ -112,27 +112,38 @@ ticking every 60s — see the parent repo's `install.sh`) that runs
 crashing can't stop the other).
 
 A 60s tick isn't a 60s poll rate: both pollers self-throttle most ticks away
-(see each script's own module docstring), settling to roughly the old flat
-5-minute cadence while idle — but in opposite directions while "live",
-because each side has a different local source of truth to lean on:
+(see each script's own module docstring). `poll_claude.py` has two tiers;
+`poll_codex.py` has three, because unlike Claude's in-memory-only
+`rate_limits`, Codex's is already durably written to a local session file on
+every turn - a source of truth polling can never beat, not just a cache to
+fall back on:
 
-| Agent | What counts as "live" | If live | Otherwise (idle) |
-|---|---|---|---|
-| **Claude** | A heartbeat file `../providers/claude-statusline-command.sh` (same repo) touches on every statusline **render** — updates just from having a session open on screen, whether or not you're actively prompting | Poll every tick (~60s) | Poll only if the last logged reading is ≥300s old (~5 min cadence) |
-| **Codex** | mtime of the session's own local `.jsonl` under `~/.codex/sessions/`, updated only when a turn actually **completes** and appends a `token_count` event — an open-but-idle session that isn't being prompted does *not* count as live | Skip the poll — the local file already has a fresher `rate_limits` snapshot for free (see `recompute_codex_events.py` below) | Poll only if the last logged `codex` reading is ≥300s old (~5 min cadence) |
+| Tier | Claude | Codex |
+|---|---|---|
+| **Local data is fresher than any poll** | *(no equivalent - Claude's rate-limit state is never written to disk on its own, see below)* | A local session `.jsonl` under `~/.codex/sessions/` was modified within the last 300s (a turn just completed, writing a fresh `rate_limits` snapshot via the `token_count` event) → **skip the poll entirely**. |
+| **Someone's watching, but no fresher local signal** | `claude.heartbeat` is fresh (any render, whether or not you're actively prompting) → poll every tick (~60s) | `codex.heartbeat` is fresh and the tier above didn't already skip (idle session left open) → poll every tick (~60s) - must equal the LaunchAgent's own tick exactly, not just be close to it (see `poll_codex.py`'s docstring for why) |
+| **Idle backstop** | Poll only if the last logged reading is ≥300s old (~5 min cadence) | Same, ≥300s |
 
-Claude speeds up when live because polling used to be its *only* source of
-truth — the statusline side used to poll this same endpoint itself, and
-running that independently of this poller is exactly what caused 429s
-during busy multi-session hours. As of the 2026-08-31 merge, the statusline
-side pushes its own `source: "claude_statusline"` reading directly instead
-(see `AGENTS.md`'s "Quota tracking" summary at the parent README.md and the
-schema in this project's `AGENTS.md`) — this poller's `source: "claude"`
-rows are now a fallback for the gap that push path can't cover, not the
-primary signal, though the heartbeat-driven speedup above is unchanged.
-Codex does the opposite — it skips polling when live because an active
-session already writes its own `rate_limits` snapshot locally, so polling
-then would just be paying for a number the local file already has.
+Both heartbeat files are the same mechanism (`../providers/claude-statusline-command.sh`
+/ `../providers/codex-statusline-command.sh`, same repo, touched on every
+render) and exist for the same reason: quota can drift from other
+sessions/devices on the account that neither poller's own local signals can
+see, and it matters more while a human is actually looking at the number.
+
+The two pollers differ in *why* polling is needed at all, not just in
+cadence. Claude speeds up when watched because polling used to be its
+*only* source of truth — the statusline side used to poll this same
+endpoint itself, and running that independently of this poller is exactly
+what caused 429s during busy multi-session hours. As of the 2026-08-31
+merge, the statusline side pushes its own `source: "claude_statusline"`
+reading directly instead (see `AGENTS.md`'s "Quota tracking" summary at the
+parent README.md and the schema in this project's `AGENTS.md`) — this
+poller's `source: "claude"` rows are now a fallback for the gap that push
+path can't cover, not the primary signal. Codex never needed an equivalent
+push: the data's already durable on disk via the local session file, so
+writing it *again* into the shared log from the statusline would just be a
+second copy of something that already exists - the heartbeat-driven speedup
+above is the whole fix needed on the Codex side.
 
 `poll_claude.py` fetches the full raw `/api/oauth/usage` response
 (unfiltered — every field, including ones currently `null` on this

@@ -75,7 +75,7 @@ run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 quota_cache="$STATUSLINE_RUNTIME_DIR/state/providers/claude"
 assert_file_exists "first call seeds the quota cache from the payload" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "55"
-assert_file_exists "every render touches the liveness heartbeat agent-quota-tracker polls faster against" \
+assert_file_exists "every render touches the liveness heartbeat quota/poll_claude.py polls faster against" \
     "$STATUSLINE_RUNTIME_DIR/state/providers/claude.heartbeat"
 
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"

@@ -57,6 +57,8 @@ run_codex "$FIXTURES/codex-payload.json" "$plain_dir"
 quota_cache="$STATUSLINE_RUNTIME_DIR/state/providers/codex"
 assert_file_exists "quota cache written from the payload" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "20"
+assert_file_exists "every render touches the liveness heartbeat quota/poll_codex.py polls faster against" \
+    "$STATUSLINE_RUNTIME_DIR/state/providers/codex.heartbeat"
 
 section "carousel: page 1 (model/host/cwd)"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime3.XXXXXX")"
@@ -95,5 +97,7 @@ run_codex "$FIXTURES/codex-payload-full-ask.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_file_missing "no rate_limits in the payload: quota cache not written" \
     "$STATUSLINE_RUNTIME_DIR/state/providers/codex"
+assert_file_exists "heartbeat is still touched even with no rate_limits in the payload" \
+    "$STATUSLINE_RUNTIME_DIR/state/providers/codex.heartbeat"
 
 harness_summary

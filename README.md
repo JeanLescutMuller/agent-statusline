@@ -141,6 +141,7 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     state/providers/claude        5h percent/reset, 7d percent/reset
     state/providers/claude.heartbeat  epoch of the last Claude render (see below)
     state/providers/codex         5h percent/reset, 7d percent/reset
+    state/providers/codex.heartbeat   epoch of the last Codex render (see below)
     state/git/cwd/.../local       local Git snapshot for that cwd
     state/git/cwd/.../remote      remote Git snapshot for that cwd
     locks/                        atomic refresh locks
@@ -210,7 +211,7 @@ genuinely different persistence properties:
 | `source` | Writer | Cadence | Why it exists |
 |---|---|---|---|
 | `claude` | `quota/poll_claude.py` (LaunchAgent, `GET /api/oauth/usage`) | ~60s while a statusline is live, ~5min idle | That endpoint has no history - a missed reading is permanently lost. Unreliable (~21% 429 rate historically; can lock out for 3+ days - see `quota/AGENTS.md`). |
-| `codex` | `quota/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot, else ~5min | Codex has no plain HTTP usage endpoint. |
+| `codex` | `quota/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`codex.heartbeat`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
 | `claude_statusline` | `lib/statusline-push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
 
 Every `claude`/`codex` row also feeds `analysis.ipynb`'s research into what

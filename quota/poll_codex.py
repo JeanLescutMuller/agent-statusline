@@ -22,23 +22,39 @@ ids and isn't part of "the current rate-limit snapshot", the same
 "unrecoverable" bar poll_claude.py applies. That's future work for a
 recompute_codex_events.py analogue, not this poller.
 
-The shared LaunchAgent tick dropped to 60s so poll_claude.py could poll
-faster while a Claude Code statusline is live (see its module docstring).
-Codex is the mirror image, not the same trick: agent-statusline's Codex
-adapter never polls at all - it just relays whatever the live Codex CLI
-session hands it directly - and, separately, an active Codex session
-already writes its own rate_limits snapshot to
-~/.codex/sessions/**/*.jsonl on every turn (the `token_count` event; see
-recompute_codex_events.py and AGENTS.md's 2026-08-30 correction). So while
-a session is actively being written, an RPC poll here would just be paying
-for a number the local file already has for free, fresher than our 5-min
-cadence could ever be. IDLE_INTERVAL_SECONDS below does double duty:
-_codex_session_recently_active() skips this tick entirely if some session
-file was modified more recently than that, and _should_poll() also uses it
-as the flat idle cadence once no session is active - both numbers happen to
-be the same interval, not a coincidence, just "how fresh is fresh enough".
-Deliberately no dependency on poll_claude.py or agent-statusline for
-either check - this reads Codex's own local files directly.
+The shared LaunchAgent tick is 60s. Three cadence tiers, checked in order,
+mirroring poll_claude.py's heartbeat-driven speedup but adding a tier it
+has no equivalent of:
+
+1. A local Codex session file was modified within SESSION_FRESH_SECONDS -
+   an active session already writes its own rate_limits snapshot to
+   ~/.codex/sessions/**/*.jsonl on every turn (the `token_count` event; see
+   recompute_codex_events.py and AGENTS.md's 2026-08-30 correction), fresher
+   than any poll here could be. Skip entirely. poll_claude.py has no
+   equivalent tier - Claude Code's in-memory rate-limit state is never
+   written to disk on its own (see agent-statusline's push script), so
+   polling is Claude's *only* source of truth even mid-session.
+2. Otherwise, providers/codex-statusline-command.sh's codex.heartbeat file
+   (same repo, same shape as claude.heartbeat) is fresh within
+   HEARTBEAT_ACTIVE_WINDOW_SECONDS - a statusline is open and idle, so the
+   local file above is stale, but someone is watching and other
+   sessions/devices on the account can still move the meter. Poll at
+   WATCHED_POLL_INTERVAL_SECONDS, which must equal the LaunchAgent's own
+   tick exactly (60s) - a slower threshold degrades to half the intended
+   cadence, since the skip window then spans more than one tick and never
+   clears it on a single tick's elapsed time (proven during
+   agent-statusline's own merge design, see /tmp/agent-quota-merge-plan.md
+   if it still exists, or poll_claude.py's own history).
+3. Neither - nothing local to lean on and nobody watching. Poll only if the
+   last logged reading is IDLE_POLL_INTERVAL_SECONDS old, so a fully idle
+   machine settles to the old flat 5-minute cadence instead of a 60s
+   busy-loop for no reason. This tier is genuinely a backstop, same as
+   poll_claude.py's idle cadence - just here to keep the log from going
+   dark for long unattended stretches, not to catch anything reliably.
+
+Deliberately no dependency on poll_claude.py for any of this - only on
+agent-statusline's own heartbeat-file convention (same repo now), which
+degrades gracefully to tier 3 if the statusline provider is ever absent.
 """
 import json
 import shutil
@@ -52,8 +68,13 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 UTIL_LOG_FILE = DATA_DIR / "utilization-log.jsonl"
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
+HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "providers" / "codex.heartbeat"
 
-IDLE_INTERVAL_SECONDS = 300
+# See the module docstring for the three-tier gating these constants drive.
+SESSION_FRESH_SECONDS = 300
+HEARTBEAT_ACTIVE_WINDOW_SECONDS = 90
+WATCHED_POLL_INTERVAL_SECONDS = 60  # must equal the LaunchAgent's StartInterval exactly
+IDLE_POLL_INTERVAL_SECONDS = 300
 
 # launchd runs jobs with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
 # doesn't include ~/.local/bin, where this user's `codex` symlink lives (see
@@ -176,7 +197,7 @@ def _last_codex_log_ts() -> int | None:
 
 def _codex_session_recently_active(now: float) -> bool:
     """True if some Codex session rollout file was modified within the
-    last IDLE_INTERVAL_SECONDS - meaning a live session already has a
+    last SESSION_FRESH_SECONDS - meaning a live session already has a
     fresher rate_limits snapshot on disk than polling would get us (see
     module docstring). Only scans today's and yesterday's local-date
     directories (~/.codex/sessions/YYYY/MM/DD/, bucketed by *local* time -
@@ -194,11 +215,23 @@ def _codex_session_recently_active(now: float) -> bool:
             continue
         for path in day_dir.glob("*.jsonl"):
             try:
-                if now - path.stat().st_mtime < IDLE_INTERVAL_SECONDS:
+                if now - path.stat().st_mtime < SESSION_FRESH_SECONDS:
                     return True
             except OSError:
                 continue  # file removed/rotated mid-check - not "active"
     return False
+
+
+def _is_watched(now: float) -> bool:
+    """Is a Codex statusline rendering somewhere right now? Same shape as
+    poll_claude.py's _is_active(), reading providers/codex-statusline-command.sh's
+    heartbeat file instead of claude.heartbeat. A missing file (statusline
+    not installed, or never rendered) just means this is always False, which
+    degrades gracefully to the flat idle cadence in main()."""
+    try:
+        return (now - HEARTBEAT_FILE.stat().st_mtime) < HEARTBEAT_ACTIVE_WINDOW_SECONDS
+    except OSError:
+        return False
 
 
 def main() -> None:
@@ -206,12 +239,14 @@ def main() -> None:
 
     now = time.time()
     if _codex_session_recently_active(now):
-        print(f"skip: a Codex session file was modified under {IDLE_INTERVAL_SECONDS}s ago "
+        print(f"skip: a Codex session file was modified under {SESSION_FRESH_SECONDS}s ago "
               f"- local rate_limits snapshot is already fresher than a poll would be")
         return
+    threshold = WATCHED_POLL_INTERVAL_SECONDS if _is_watched(now) else IDLE_POLL_INTERVAL_SECONDS
     last_ts = _last_codex_log_ts()
-    if last_ts is not None and (now - last_ts) < IDLE_INTERVAL_SECONDS:
-        print(f"skip: idle, last codex reading is under {IDLE_INTERVAL_SECONDS}s old")
+    if last_ts is not None and (now - last_ts) < threshold:
+        print(f"skip: last codex reading is under {threshold}s old "
+              f"({'watched' if threshold == WATCHED_POLL_INTERVAL_SECONDS else 'idle'})")
         return
 
     d_rate_limits, d_usage, d_error = fetch_codex_state()
