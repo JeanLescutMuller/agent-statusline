@@ -86,7 +86,12 @@ done
 OLD_QUOTA_FOLDER="$HOME/opt/agent-quota-tracker"
 OLD_QUOTA_LABEL="com.jeanlescut.agent-quota-tracker"
 if [ -d "$OLD_QUOTA_FOLDER" ]; then
-    launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENTS/$OLD_QUOTA_LABEL.plist" 2>/dev/null || true
+    # AGENT_STATUSLINE_SKIP_LAUNCHD lets the hermetic test suite exercise this
+    # whole step (plist content, idempotent messaging, data/ migration)
+    # without touching the real machine's launchd - gui/$(id -u) is a real
+    # per-user launchd domain, not something a HOME override can sandbox.
+    [ -n "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ] || \
+        launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENTS/$OLD_QUOTA_LABEL.plist" 2>/dev/null || true
     rm -f "$LAUNCH_AGENTS/$OLD_QUOTA_LABEL.plist"
     if [ -d "$OLD_QUOTA_FOLDER/data" ]; then
         cp -n "$OLD_QUOTA_FOLDER/data/"* "$RUNTIME/data/" 2>/dev/null || true
@@ -99,7 +104,8 @@ QUOTA_LABEL="com.jeanlescut.agent-statusline"
 QUOTA_REAL_PLIST="$RUNTIME/$QUOTA_LABEL.plist"
 QUOTA_LINK_PLIST="$LAUNCH_AGENTS/$QUOTA_LABEL.plist"
 mkdir -p "$LAUNCH_AGENTS"
-tee "$QUOTA_REAL_PLIST" >/dev/null <<PLIST
+QUOTA_PLIST_TMP="$(mktemp)"
+cat > "$QUOTA_PLIST_TMP" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -138,10 +144,18 @@ tee "$QUOTA_REAL_PLIST" >/dev/null <<PLIST
 </dict>
 </plist>
 PLIST
+if [ -f "$QUOTA_REAL_PLIST" ] && diff -q "$QUOTA_PLIST_TMP" "$QUOTA_REAL_PLIST" >/dev/null 2>&1; then
+    rm -f "$QUOTA_PLIST_TMP"
+    ok "quota poll LaunchAgent"
+else
+    mv "$QUOTA_PLIST_TMP" "$QUOTA_REAL_PLIST"
+    installed "quota poll LaunchAgent (ticks every 60s, both pollers self-throttle)"
+fi
 ln -sf "$QUOTA_REAL_PLIST" "$QUOTA_LINK_PLIST"
-launchctl bootout "gui/$(id -u)" "$QUOTA_LINK_PLIST" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$QUOTA_LINK_PLIST"
-installed "quota poll LaunchAgent (ticks every 60s, both pollers self-throttle)"
+if [ -z "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ]; then
+    launchctl bootout "gui/$(id -u)" "$QUOTA_LINK_PLIST" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$QUOTA_LINK_PLIST"
+fi
 
 step "codex status-line patch"
 if command -v codex >/dev/null 2>&1; then
