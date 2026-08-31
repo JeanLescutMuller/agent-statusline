@@ -100,6 +100,16 @@ if [ -d "$OLD_QUOTA_FOLDER" ]; then
     installed "migrated from ~/opt/agent-quota-tracker (data/ carried forward, old LaunchAgent booted out)"
 fi
 
+# One-time: agent-statusline itself renamed this log's filename
+# (utilization-log.jsonl -> quota-log.jsonl, see adhoc_quotas_analysis/AGENTS.md's
+# "Naming history") after some deployments already had the old name on disk -
+# same migrate-in-place idiom as above, one repo layer up. Guarded so a
+# second run is a no-op once the new name exists.
+if [ -f "$RUNTIME/data/utilization-log.jsonl" ] && [ ! -f "$RUNTIME/data/quota-log.jsonl" ]; then
+    mv "$RUNTIME/data/utilization-log.jsonl" "$RUNTIME/data/quota-log.jsonl"
+    installed "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
+fi
+
 QUOTA_LABEL="com.jeanlescut.agent-statusline"
 QUOTA_REAL_PLIST="$RUNTIME/$QUOTA_LABEL.plist"
 QUOTA_LINK_PLIST="$LAUNCH_AGENTS/$QUOTA_LABEL.plist"

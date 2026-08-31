@@ -101,6 +101,23 @@ assert_not_contains "no migration message on a second run - old folder is alread
     "$TH_OUT" "migrated from ~/opt/agent-quota-tracker"
 rm -rf "$th_home"
 
+section "renames a pre-existing data/utilization-log.jsonl to quota-log.jsonl"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/opt/agent-statusline/data"
+printf '{"ts":1,"source":"claude","api":{}}\n' > "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "reports the rename" "$TH_OUT" "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
+assert_file_missing "the old filename is gone" "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
+assert_file_exists "the new filename exists" "$th_home/opt/agent-statusline/data/quota-log.jsonl"
+assert_contains "renamed content is preserved, not regenerated" \
+    "$(cat "$th_home/opt/agent-statusline/data/quota-log.jsonl")" '"ts":1'
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_not_contains "no rename message on a second run - new filename already exists" \
+    "$TH_OUT" "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
+rm -rf "$th_home"
+
 section "orphaned pre-2026-08-30 usage-fetch helper is removed"
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
 mkdir -p "$th_home/.claude"
