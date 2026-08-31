@@ -148,7 +148,7 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     ├── state/
     │   ├── static/
     │   │   ├── hostname                  immutable short hostname
-    │   │   └── host-color                immutable deterministic terminal color
+    │   │   └── host-color                terminal color the hostname is printed in
     │   ├── system/
     │   │   └── metrics                   used GiB, total GiB, percent
     │   ├── heartbeat/
