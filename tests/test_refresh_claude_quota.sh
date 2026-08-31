@@ -1,10 +1,10 @@
 #!/bin/bash
 # End-to-end tests for lib/statusline-refresh-claude-quota.sh. Unlike the old
 # statusline-usage-fetch.sh this replaced, there's no Keychain or network to
-# stub - the script just reads the latest Claude row out of a fixture
-# agent-quota-tracker log, so these tests write that fixture directly. See
-# the script's own header comment for why agent-quota-tracker's log is the
-# source now instead of a live API call.
+# stub - the script just reads the latest "claude" row out of a fixture
+# quota log, so these tests write that fixture directly. See the script's
+# own header comment for why quota/poll_claude.py's log is the source now
+# instead of a live API call.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -13,7 +13,7 @@ SEP=$'\034'
 
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-quotahome.XXXXXX")"
 trap 'rm -rf "$TH_HOME"' EXIT
-LOG="$TH_HOME/opt/agent-quota-tracker/data/utilization-log.jsonl"
+LOG="$TH_HOME/opt/agent-statusline/data/utilization-log.jsonl"
 
 epoch_of() {
     python3 -c "
@@ -39,11 +39,11 @@ run_refresh() {
 five_epoch="$(epoch_of '2026-01-01T00:00:00Z')"
 seven_epoch="$(epoch_of '2026-01-05T12:30:00Z')"
 
-section "no agent-quota-tracker log file at all"
+section "no quota log file at all"
 rm -f "$LOG"
 run_refresh
 assert_status "exits 1" 1 "$TH_STATUS"
-assert_contains "explains the log is missing" "$TH_ERR" "agent-quota-tracker log not found"
+assert_contains "explains the log is missing" "$TH_ERR" "quota log not found"
 
 section "log file exists but is empty"
 write_log ""
@@ -95,6 +95,18 @@ run_refresh
 IFS="$SEP" read -r five_pct _ seven_pct _ <<< "$TH_OUT"
 assert_eq "picks the later row's 5h percent" "90" "$five_pct"
 assert_eq "picks the later row's 7d percent" "90" "$seven_pct"
+
+section "log has claude_statusline push rows amid claude poll rows - only the poll row counts"
+write_log "$(cat <<EOF
+{"ts":1,"source":"claude","api":{"five_hour":{"utilization":20},"seven_day":{"utilization":20}}}
+{"ts":2,"source":"claude_statusline","observed_at":999,"five_hour_pct":99,"seven_day_pct":99}
+EOF
+)"
+run_refresh
+assert_status "exits 0" 0 "$TH_STATUS"
+IFS="$SEP" read -r five_pct _ seven_pct _ <<< "$TH_OUT"
+assert_eq "ignores the claude_statusline row, reads the claude poll row" "20" "$five_pct"
+assert_eq "same for 7d" "20" "$seven_pct"
 
 section "missing utilization and null resets_at default cleanly"
 write_log '{"ts":1,"source":"claude","api":{"five_hour":{},"seven_day":{"resets_at":null}}}'
