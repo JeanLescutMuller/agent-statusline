@@ -1,15 +1,25 @@
-# agent-quota-tracker
+# quota tracking
+
+Part of `agent-statusline` since 2026-08-31 (folded in from the former
+standalone `agent-quota-tracker` repo — see the parent README.md's "Quota
+tracking" section for how this fits into the rest of that repo, and this
+directory's own `AGENTS.md` for the full investigation history). This file
+covers what's specific to the pollers and the research notebook.
 
 Empirically reverse-engineers how coding-agent usage-limit percentages
 (Claude Code's `five_hour` / `seven_day` utilization, and — since
 2026-08-30 — Codex's structurally identical `primary` / `secondary`
 rate limits) relate to actual usage, since neither vendor publishes the
-formula. Two pollers, one shared log: `poll_claude.py` hits Anthropic's
-`GET /api/oauth/usage`; `poll_codex.py` speaks the JSON-RPC protocol
-Codex's own TUI statusline uses (`codex app-server --stdio`), since Codex
-has no plain HTTP equivalent. See `AGENTS.md` for the schema and the
-asymmetries between the two sources (Codex reports real dollar figures
-directly for some calls; Claude's are always inferred by regression).
+formula. Two pollers plus a free push, one shared log: `poll_claude.py` hits
+Anthropic's `GET /api/oauth/usage`; `poll_codex.py` speaks the JSON-RPC
+protocol Codex's own TUI statusline uses (`codex app-server --stdio`), since
+Codex has no plain HTTP equivalent; `../lib/statusline-push-claude-quota.sh`
+(same repo, runs on every Claude render) appends a reading for free from
+`rate_limits` already present on the statusline's own stdin payload — no
+network call, and unlike the poller, never rate-limited. See `AGENTS.md` for
+the full schema and the asymmetries between all three sources (Codex reports
+real dollar figures directly for some calls; Claude's are always inferred by
+regression; the push rows carry a reduced shape).
 
 ## How the meter works
 
@@ -95,10 +105,11 @@ share a failure mode:
 
 ### `poll_claude.py` + `poll_codex.py` — the parts that run on a timer
 
-Deployed to `~/opt/agent-quota-tracker/`, scheduled via a single launchd
-LaunchAgent (`com.jeanlescut.agent-quota-tracker`, ticking every 60s — see
-`install.sh`) that runs `poll_all.py`, which in turn runs each poller as
-its own subprocess (so one crashing can't stop the other).
+Deployed to `~/opt/agent-statusline/quota/`, scheduled via
+`agent-statusline`'s single launchd LaunchAgent (`com.jeanlescut.agent-statusline`,
+ticking every 60s — see the parent repo's `install.sh`) that runs
+`poll_all.py`, which in turn runs each poller as its own subprocess (so one
+crashing can't stop the other).
 
 A 60s tick isn't a 60s poll rate: both pollers self-throttle most ticks away
 (see each script's own module docstring), settling to roughly the old flat
@@ -107,17 +118,21 @@ because each side has a different local source of truth to lean on:
 
 | Agent | What counts as "live" | If live | Otherwise (idle) |
 |---|---|---|---|
-| **Claude** | A heartbeat file agent-statusline (a separate project on this machine) touches on every statusline **render** — updates just from having a session open on screen, whether or not you're actively prompting | Poll every tick (~60s) | Poll only if the last logged reading is ≥300s old (~5 min cadence) |
+| **Claude** | A heartbeat file `../providers/claude-statusline-command.sh` (same repo) touches on every statusline **render** — updates just from having a session open on screen, whether or not you're actively prompting | Poll every tick (~60s) | Poll only if the last logged reading is ≥300s old (~5 min cadence) |
 | **Codex** | mtime of the session's own local `.jsonl` under `~/.codex/sessions/`, updated only when a turn actually **completes** and appends a `token_count` event — an open-but-idle session that isn't being prompted does *not* count as live | Skip the poll — the local file already has a fresher `rate_limits` snapshot for free (see `recompute_codex_events.py` below) | Poll only if the last logged `codex` reading is ≥300s old (~5 min cadence) |
 
-Claude speeds up when live because polling is its *only* source of truth —
-agent-statusline used to poll this same endpoint itself, and running that
-independently of this poller is exactly what caused 429s during busy
-multi-session hours; it now reads this project's log instead (see
-`AGENTS.md`'s "Cross-project dependency" notes in both repos). Codex does
-the opposite — it skips polling when live because an active session
-already writes its own `rate_limits` snapshot locally, so polling then
-would just be paying for a number the local file already has.
+Claude speeds up when live because polling used to be its *only* source of
+truth — the statusline side used to poll this same endpoint itself, and
+running that independently of this poller is exactly what caused 429s
+during busy multi-session hours. As of the 2026-08-31 merge, the statusline
+side pushes its own `source: "claude_statusline"` reading directly instead
+(see `AGENTS.md`'s "Quota tracking" summary at the parent README.md and the
+schema in this project's `AGENTS.md`) — this poller's `source: "claude"`
+rows are now a fallback for the gap that push path can't cover, not the
+primary signal, though the heartbeat-driven speedup above is unchanged.
+Codex does the opposite — it skips polling when live because an active
+session already writes its own `rate_limits` snapshot locally, so polling
+then would just be paying for a number the local file already has.
 
 `poll_claude.py` fetches the full raw `/api/oauth/usage` response
 (unfiltered — every field, including ones currently `null` on this
@@ -173,17 +188,20 @@ table above).
 ## Setup
 
 ```bash
+cd ../  # this is quota/ - install.sh lives at the agent-statusline repo root
 ./install.sh
 ```
 
-Idempotent — deploys all three scripts to `~/opt/agent-quota-tracker/`,
-writes/refreshes the LaunchAgent plist, and (re)loads it via
-`launchctl bootstrap`. Self-migrating: detects any prior layout (see
-`AGENTS.md`'s naming history) and moves it to the current name
-automatically, carrying `data/utilization-log.jsonl` forward.
+Idempotent — deploys the three poll/dispatch scripts plus the two
+`recompute_*.py` scripts to `~/opt/agent-statusline/quota/`,
+writes/refreshes the `com.jeanlescut.agent-statusline` LaunchAgent plist, and
+(re)loads it via `launchctl bootstrap`. Self-migrating: on a machine that
+still has a standalone `agent-quota-tracker` deployment, detects it (see
+`AGENTS.md`'s naming history) and folds it in automatically, carrying
+`data/utilization-log.jsonl` forward and retiring its LaunchAgent.
 
 ```bash
-python3 ~/opt/agent-quota-tracker/recompute_token_events.py
+python3 ~/opt/agent-statusline/quota/recompute_token_events.py
 ```
 
 Run this before any analysis session — it's what populates/refreshes
@@ -191,9 +209,9 @@ Run this before any analysis session — it's what populates/refreshes
 
 ## Data files
 
-Both live under `~/opt/agent-quota-tracker/data/` (the deployed
-runtime location, not this source checkout — see the dev-wide convention
-in `~/dev/CLAUDE.md`).
+Live under `~/opt/agent-statusline/data/` (a sibling of `quota/` in the
+deployed runtime, not nested under it, and not this source checkout — see
+the dev-wide convention in `~/dev/CLAUDE.md`).
 
 **`utilization-log.jsonl`** — one record per poll tick, shared by both
 pollers, disambiguated by `source` (added 2026-08-30; rows before that
@@ -268,6 +286,28 @@ two-tier shape, 300 min and 10,080 min (7-day) windows respectively.
 convention as `poll_claude.py`, with stages `spawn` (the `codex` binary
 couldn't be started), `timeout`, `rpc` (a JSON-RPC error response, e.g.
 not logged in), and `parse`.
+
+Claude push rows (since the 2026-08-31 agent-statusline merge), written by
+`../lib/statusline-push-claude-quota.sh` on real Claude Code renders, not
+on a timer:
+```jsonc
+{
+  "ts": 1788174515, "iso": "2026-08-31T10:01:55Z",
+  "source": "claude_statusline",
+  "observed_at": 1788174005,              // the transcript's own last message
+                                           // timestamp, NOT this row's append time -
+                                           // when Claude Code's in-memory rate_limits
+                                           // state actually became true
+  "five_hour_pct": 42, "seven_day_pct": 55,
+  "five_hour_resets_at": "2026-08-31T15:00:00Z",   // or null
+  "seven_day_resets_at": "2026-09-07T00:00:00Z"    // or null
+}
+```
+Deliberately a reduced shape - no raw API response, no headers, no `error`
+(a push that can't compute `observed_at` just doesn't happen, silently -
+there's nothing to log). No `codex_statusline` equivalent: Codex's provider
+adapter never reads this shared log at all (see the parent README.md's
+"Architecture" section), so there's no analogous free push for it yet.
 
 **`token-events.jsonl`** — one record per assistant message with usage:
 ```jsonc

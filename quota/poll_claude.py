@@ -15,20 +15,28 @@ on disk (cleanupPeriodDays=365 on this machine, so "durably" means about a
 year). Only log what can't be recomputed after the fact.
 
 The LaunchAgent ticks this every 60s (see install.sh), but every tick isn't
-necessarily a real poll: agent-statusline (a separate project - see its
-AGENTS.md's "Cross-project dependency") touches a heartbeat file on every
-statusline render, so a heartbeat younger than ACTIVE_WINDOW_SECONDS means a
-statusline is being drawn somewhere *right now*. If so, poll for real -
-that's the whole point of a 60s tick. If not, only poll if the last logged
-reading (of either outcome, success or error) is already
-IDLE_INTERVAL_SECONDS old, so a fully idle machine still settles to roughly
-the old flat 5-minute cadence instead of a 60s busy-loop for no reason. This
-deliberately does NOT key off token/message activity - a usage window
-resetting to 0% moves the meter with zero new tokens spent, so "is anyone
-even looking at a statusline" is the right signal, not "did tokens move."
-A missing heartbeat file (statusline not installed, or never rendered) just
-means is_active() is always False, which degrades gracefully to the old
-flat 5-minute cadence.
+necessarily a real poll: ../providers/claude-statusline-command.sh (this
+repo's Claude statusline adapter - see the root AGENTS.md's "Quota tracking"
+section) touches a heartbeat file on every statusline render, so a heartbeat
+younger than ACTIVE_WINDOW_SECONDS means a statusline is being drawn
+somewhere *right now*. If so, poll for real - that's the whole point of a
+60s tick. If not, only poll if the last logged reading (of either outcome,
+success or error) is already IDLE_INTERVAL_SECONDS old, so a fully idle
+machine still settles to roughly the old flat 5-minute cadence instead of a
+60s busy-loop for no reason. This deliberately does NOT key off
+token/message activity - a usage window resetting to 0% moves the meter with
+zero new tokens spent, so "is anyone even looking at a statusline" is the
+right signal, not "did tokens move." A missing heartbeat file (statusline
+not installed, or never rendered) just means is_active() is always False,
+which degrades gracefully to the old flat 5-minute cadence.
+
+Note this poller's own `source: "claude"` rows are a fallback path now, not
+the primary one: ../lib/statusline-push-claude-quota.sh pushes a free
+`source: "claude_statusline"` reading on every real message, riding
+Claude Code's own in-memory rate_limits state - no network call, never
+rate-limited. This poller still matters for the gap that push path can't
+cover: a session that hasn't sent its first message yet, or a stretch with
+no statusline rendering anywhere on the machine at all.
 """
 import json
 import subprocess

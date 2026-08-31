@@ -83,44 +83,61 @@ pricing.
 
 ## Repo ↔ deploy layout (standard convention, see `~/dev/CLAUDE.md` / `~/.claude/CLAUDE.md`)
 
-- `~/dev/agent-quota-tracker/` — this git repo, source of truth for code. **Never edit the deployed copy directly.**
-- `~/opt/agent-quota-tracker/` — deployed runtime copy: `poll_claude.py`, `poll_codex.py`, `poll_all.py`, `recompute_token_events.py`, `recompute_codex_events.py`, the LaunchAgent plist, and `data/` (the actual logs — gitignored, lives only here). Edit code in `~/dev`, then re-run `./install.sh` to redeploy.
-- `~/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist` — symlink only, points into `~/opt/.../`. Never a real file there.
-- LaunchAgent ticks `poll_all.py` every 60s (`StartInterval=60`, changed from 300 on 2026-08-30), which runs `poll_claude.py` then `poll_codex.py` as subprocesses — but a tick isn't necessarily a poll. Both pollers self-throttle most ticks away, settling to roughly the old flat 5-minute cadence while idle (see each script's own module docstring); `poll_claude.py` additionally speeds back up to every tick while agent-statusline (a separate project) reports a live Claude Code statusline, via a heartbeat file it touches on every render. This exists because agent-statusline used to poll the same Anthropic endpoint itself on a 60s cache TTL, and running that opportunistically across every open session independently caused 429s during busy multi-session hours — agent-statusline now reads this project's log instead (see its own `AGENTS.md`'s "Cross-project dependency").
+**2026-08-31: this project merged into `agent-statusline`** (see "Naming
+history" below) — the rest of this section describes the layout as it
+exists post-merge; a few paragraphs still say things like "this project" the
+way the pre-merge repo would have, since most of this file (findings,
+gotchas, investigation) is kept verbatim from that repo rather than rewritten.
+
+- `~/dev/agent-statusline/quota/` — this directory, part of the
+  `agent-statusline` git repo (full history from the standalone
+  `agent-quota-tracker` repo preserved under this prefix). Source of truth
+  for code. **Never edit the deployed copy directly.**
+- `~/opt/agent-statusline/quota/` — deployed pollers: `poll_claude.py`,
+  `poll_codex.py`, `poll_all.py`, `recompute_token_events.py`,
+  `recompute_codex_events.py`. `~/opt/agent-statusline/data/` (a sibling,
+  not nested under `quota/`) holds the actual logs — gitignored, lives only
+  here. Edit code in `~/dev/agent-statusline`, then re-run `./install.sh` to
+  redeploy (see that repo's own `install.sh`, not a separate one here).
+- `~/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist` — symlink
+  only, points into `~/opt/agent-statusline/`. Never a real file there.
+- LaunchAgent ticks `poll_all.py` every 60s (`StartInterval=60`, changed from
+  300 on 2026-08-30), which runs `poll_claude.py` then `poll_codex.py` as
+  subprocesses — but a tick isn't necessarily a poll. Both pollers
+  self-throttle most ticks away, settling to roughly the old flat 5-minute
+  cadence while idle (see each script's own module docstring); `poll_claude.py`
+  additionally speeds back up to every tick while a Claude Code statusline
+  render touches a heartbeat file (`lib/statusline-push-claude-quota.sh`'s
+  sibling in `../providers/claude-statusline-command.sh` — same repo now,
+  see the root `AGENTS.md`'s "Quota tracking" section). This existed
+  historically because the statusline side used to poll the same Anthropic
+  endpoint itself on a 60s cache TTL, and running that opportunistically
+  across every open session independently caused 429s during busy
+  multi-session hours; the statusline side now pushes its own free
+  `rate_limits` reading directly into `data/utilization-log.jsonl` instead
+  of polling at all (`source: "claude_statusline"` rows — this poller's own
+  `source: "claude"` rows are a fallback now, not the primary path).
 - `poll_codex.py` self-throttles the *opposite* direction (added 2026-08-30): it **skips** a tick outright if any `~/.codex/sessions/**/*.jsonl` file was modified in the last 5 minutes, because an active Codex session already writes its own `rate_limits` snapshot to that file on every turn (the `token_count` event — see "Correction" above and `recompute_codex_events.py`), fresher than a poll would get anyway. Once no session file is that fresh, it falls back to the same flat ~5-minute cadence the Claude side uses while idle. Don't confuse the two directions: Claude speeds up when active because polling is the *only* source of truth there; Codex skips when active because polling would be redundant with a free local source. One consequence worth knowing before you go looking for a bug: `data/utilization-log.jsonl`'s `source: "codex"` rows will show gaps during exactly the periods of heaviest Codex use — that's by design, not lost coverage; the trajectory for those periods lives in `data/codex-token-events.jsonl` instead (not yet merged into `analysis.ipynb` — see Natural next steps).
-
-## Cross-project dependency
-
-agent-statusline (a separate repo/project, `~/dev/agent-statusline`) reads
-this project's `data/utilization-log.jsonl` for the Claude quota it shows in
-the statusline, instead of polling Anthropic's usage endpoint itself (see
-its own `AGENTS.md`'s "Cross-project dependency" section) — this project is
-the single fixed-cadence poller for that endpoint on this machine now; a
-second independent poller caused 429s during busy multi-session hours.
-
-The coupling goes the other way too: `poll_claude.py` reads
-`~/opt/agent-statusline/state/providers/claude.heartbeat`'s mtime to know
-whether a Claude Code statusline is rendering somewhere right now, and polls
-faster while it is (see `poll_claude.py`'s module docstring). Both
-directions are soft dependencies — if the other project isn't installed,
-each side just falls back to its older, flatter behavior (agent-statusline
-shows stale/no quota data; this project's Claude poller never detects
-"live" and settles to its flat idle cadence).
 
 ## Naming history (in case anything still references an old name)
 
-Renamed three times, most recently 2026-08-27:
+Renamed three times as a standalone repo, then merged:
 1. `utilization-tracker` / `com.jeanlescut.utilization-tracker` (original, pre-2026-08-26)
 2. → `claude-utilization-tracker` / `com.jeanlescut.claude-utilization-tracker` (2026-08-26)
 3. → `claude-utilization-cost-tracker` / `com.jeanlescut.claude-utilization-cost-tracker` (2026-08-26, later same day — folded in the $-cost-weighting hypothesis, which the plain "utilization-tracker" name didn't capture)
-4. → `agent-quota-tracker` / `com.jeanlescut.agent-quota-tracker` (current, 2026-08-27 — dropped the Claude-specific name: this project is meant to track other coding agents' quotas too, starting with Codex. Naming got ahead of implementation at the time of this rename — the Codex poller itself landed 2026-08-30, see "What this project is" above)
+4. → `agent-quota-tracker` / `com.jeanlescut.agent-quota-tracker` (2026-08-27 — dropped the Claude-specific name: this project is meant to track other coding agents' quotas too, starting with Codex. Naming got ahead of implementation at the time of this rename — the Codex poller itself landed 2026-08-30, see "What this project is" above)
+5. → merged into `agent-statusline` as `quota/`, 2026-08-31 (the two projects'
+   "Cross-project dependency" sections had grown into exactly the kind of
+   coupling the machine's own `~/opt/<project>/` ownership convention warns
+   against — see the root `AGENTS.md`'s "Quota tracking" section for the
+   decision and its motivation). `com.jeanlescut.agent-quota-tracker`, the
+   standalone LaunchAgent label, is retired; `com.jeanlescut.agent-statusline`
+   now covers both the statusline render path and this poller.
 
-`install.sh` self-migrates from *any* prior layout automatically
-(`migrate_legacy()` helper, called once per prior name) — carries `data/`
-forward, boots out the old LaunchAgent label, removes the old folder.
-Idempotent, safe to re-run any time. If you ever see a fifth rename, add a
-fifth `migrate_legacy` call rather than deleting the old ones — each is a
-no-op once its source folder is gone, so there's no cost to keeping them.
+`agent-statusline`'s own `install.sh` self-migrates from any prior layout
+automatically (`migrate_legacy()`-style helpers, one per prior name/repo) —
+carries `data/` forward, boots out the old LaunchAgent label, removes the old
+folder. Idempotent, safe to re-run any time.
 
 ## Architecture: why the scripts are split this way
 
@@ -188,7 +205,7 @@ check `cleanupPeriodDays` is still 365 first — if it's been dropped back to
 
 Full JSON schema examples are in `README.md`. Quick summary:
 
-- `data/utilization-log.jsonl` — one record per poll tick, shared by both pollers. Claude rows: `{ts, iso, source: "claude", api, api_headers, error}`. Codex rows (since 2026-08-30): `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
+- `data/utilization-log.jsonl` — shared by three writers now, disambiguated by `source`. Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Codex poll rows (since 2026-08-30): `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../lib/statusline-push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
 - `data/token-events.jsonl` — one record per assistant message with usage, full fidelity (model, effort, session/cwd/sidechain identity, verbatim `usage` object including the `cache_creation` 5m/1h split and `output_tokens_details.thinking_tokens`). Deliberately excludes message content. Claude-only (see "Architecture" above).
 - `data/codex-token-events.jsonl` — Codex analogue, one record per local `token_count` event (roughly one per turn), full fidelity (session id/cwd, `total_token_usage`/`last_token_usage`, and the `rate_limits` snapshot logged alongside it). Built by `recompute_codex_events.py` from local session files only — no API call (see "Architecture" above).
 
