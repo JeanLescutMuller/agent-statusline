@@ -121,6 +121,21 @@ if [ -f "$RUNTIME/data/utilization-log.jsonl" ] && [ ! -f "$RUNTIME/data/quota-l
     installed "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
 fi
 
+# One-time: split the combined data/quota-log.jsonl into per-provider files
+# (data/claude-quota-history.jsonl, data/codex-quota-history.jsonl - see
+# adhoc_quotas_analysis/AGENTS.md's "Naming history"). split_quota_log.py
+# itself is idempotent (no-ops if the old file is gone or either new file
+# already exists), so this is safe to leave in place permanently rather
+# than removing it after the first deploy that runs it. Its own stdout
+# distinguishes "actually split" (starts with "wrote ") from a no-op, so
+# that decides which helper reports it, same as everywhere else in this
+# script.
+split_output="$("$PYTHON3" "$RUNTIME/adhoc_quotas_analysis/split_quota_log.py" "$RUNTIME/data")"
+case "$split_output" in
+    *"wrote "*) installed "$(printf '%s\n' "$split_output" | tail -n1)" ;;
+    *)          ok "quota log already split (or nothing to split)" ;;
+esac
+
 QUOTA_LABEL="com.jeanlescut.agent-statusline"
 QUOTA_REAL_PLIST="$RUNTIME/$QUOTA_LABEL.plist"
 QUOTA_LINK_PLIST="$LAUNCH_AGENTS/$QUOTA_LABEL.plist"

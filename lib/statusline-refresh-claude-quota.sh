@@ -7,15 +7,17 @@
 # live stdin `rate_limits` payload directly (see
 # lib/statusline-push-claude-quota.sh), falling back to this cached value
 # only for a session that hasn't sent its first message yet. Reads the
-# latest reading from adhoc_quotas_analysis/poll_claude.py's shared log instead of hitting
-# Anthropic's usage endpoint directly - that poller is this account's single
-# fixed-cadence, session-count-independent caller of that endpoint (see
+# latest reading from adhoc_quotas_analysis/poll_claude.py's log
+# (data/claude-quota-history.jsonl, shared with the push path above,
+# disambiguated by `source`) instead of hitting Anthropic's usage endpoint
+# directly - that poller is this account's single fixed-cadence,
+# session-count-independent caller of that endpoint (see
 # adhoc_quotas_analysis/AGENTS.md); a second independent poller here duplicated that traffic
 # and caused 429s during busy multi-session hours.
 set -uo pipefail
 
 separator=$'\034'
-log_file="$HOME/opt/agent-statusline/data/quota-log.jsonl"
+log_file="$HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
 
 fail_read() {
     printf 'Claude quota read: %s\n' "$1" >&2
@@ -24,9 +26,9 @@ fail_read() {
 
 [ -f "$log_file" ] || fail_read "quota log not found at $log_file"
 
-# The shared log now interleaves three sources - claude/codex poll rows plus
-# frequent claude_statusline push rows - so a busy session can push poll
-# rows further back in the tail than the old two-source file did. 200 lines
+# This file interleaves two sources - claude poll rows plus frequent
+# claude_statusline push rows - so a busy session can push poll rows
+# further back in the tail than a poll-only file would. 200 lines
 # comfortably covers the most recent successful "claude" poll reading even
 # during a heavily active session between poll ticks.
 result="$(tail -n 200 "$log_file" | jq -n -jr --arg separator "$separator" '

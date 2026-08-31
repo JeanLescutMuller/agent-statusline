@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Samples Codex CLI's rate-limit/usage state on a timer, same rationale as
 poll_claude.py: this side has no history either, a missed reading is
-permanently lost. Appends one record per run to data/quota-log.jsonl
-(the same shared file poll_claude.py writes, disambiguated by `source`) -
-the full raw `account/rateLimits/read` and `account/usage/read` results,
-unfiltered, or an `error` object saying which stage failed and why.
+permanently lost. Appends one record per run to
+data/codex-quota-history.jsonl (this poller's own file, a sibling of
+poll_claude.py's data/claude-quota-history.jsonl - split 2026-08-31, see
+AGENTS.md's "Naming history") - the full raw `account/rateLimits/read` and
+`account/usage/read` results, unfiltered, or an `error` object saying which
+stage failed and why.
 
 Unlike Claude Code, Codex has no plain HTTP usage endpoint. Its CLI
 statusline gets rate-limit data from a JSON-RPC method on `codex
@@ -66,7 +68,7 @@ from pathlib import Path
 # runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
 # parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-QUOTA_LOG_FILE = DATA_DIR / "quota-log.jsonl"
+QUOTA_LOG_FILE = DATA_DIR / "codex-quota-history.jsonl"
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "heartbeat" / "codex"
 
@@ -171,7 +173,11 @@ def fetch_codex_state() -> tuple[dict | None, dict | None, dict | None]:
 def _last_codex_log_ts() -> int | None:
     """Timestamp of the last codex-sourced row, read from the tail of the
     file rather than a full scan - this runs every tick, forever, and the
-    log only grows."""
+    log only grows. The source filter below is now redundant in the common
+    case (codex-quota-history.jsonl only ever gets `source: "codex"` rows
+    written to it since the 2026-08-31 per-provider split), but kept as a
+    cheap defensive check against a stray/malformed row rather than trusting
+    file identity alone."""
     if not QUOTA_LOG_FILE.exists():
         return None
     with QUOTA_LOG_FILE.open("rb") as f:

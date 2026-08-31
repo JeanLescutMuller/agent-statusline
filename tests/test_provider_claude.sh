@@ -4,7 +4,7 @@
 # point at an isolated temp runtime, and a captured payload is piped in.
 #
 # HOME is also overridden per call. The script hardcodes
-# $HOME/opt/agent-quota-tracker/data/quota-log.jsonl for its live quota
+# $HOME/opt/agent-statusline/data/claude-quota-history.jsonl for its live quota
 # refresh (see lib/statusline-refresh-claude-quota.sh - test_refresh_claude_quota.sh
 # covers that script directly) and $HOME/opt/bootstrap-home/bin/get_host_color
 # for the host color - pointing HOME at an empty temp dir makes both misses

@@ -80,7 +80,10 @@ kept as its own file rather than merged into this one, the same way
 
 The coupling between `adhoc_quotas_analysis/` and `lib/`/`providers/` is file-based, not a
 `source`/import — see README.md's "Architecture" section for exactly which
-scripts read/write `data/quota-log.jsonl`. One thing worth stating
+scripts read/write `data/claude-quota-history.jsonl` and
+`data/codex-quota-history.jsonl` (split from a single combined
+`data/quota-log.jsonl` on 2026-08-31 — see `adhoc_quotas_analysis/AGENTS.md`'s
+"Naming history"). One thing worth stating
 plainly here since it's easy to get backwards: `lib/statusline-push-claude-quota.sh`
 is the *primary* Claude quota path now (free, rides existing traffic, never
 rate-limited); `lib/statusline-refresh-claude-quota.sh` + `adhoc_quotas_analysis/poll_claude.py`

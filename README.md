@@ -79,8 +79,10 @@ flowchart TB
     refreshscript["lib/statusline-refresh-claude-quota.sh
     fallback: no rate_limits yet this session"]
 
-    sharedlog[("data/quota-log.jsonl
-    3 sources: claude / codex / claude_statusline")]
+    claudelog[("data/claude-quota-history.jsonl
+    2 sources: claude / claude_statusline")]
+    codexlog[("data/codex-quota-history.jsonl
+    1 source: codex")]
 
     subgraph pollers["Scheduled — LaunchAgent, every 60s"]
         direction TB
@@ -107,9 +109,9 @@ flowchart TB
     provcodex -->|touches every render| hbX
 
     provclaude -->|"rate_limits on stdin"| pushscript
-    pushscript -->|appends| sharedlog
+    pushscript -->|appends| claudelog
     provclaude -.->|"no rate_limits yet"| refreshscript
-    refreshscript -.->|reads latest claude row| sharedlog
+    refreshscript -.->|reads latest claude row| claudelog
     provclaude -.->|read/write| ccC
 
     provcodex -->|writes payload snapshot| ccX
@@ -118,31 +120,42 @@ flowchart TB
     pollall --> pollcodex
     pollclaude -.->|checks freshness| hbC
     pollclaude -->|"~60s watched, ~5min idle"| anthropicusage
-    pollclaude -->|appends| sharedlog
+    pollclaude -->|appends| claudelog
     pollcodex -.->|checks freshness| hbX
     pollcodex -->|"~60s watched, ~5min idle"| codexrpc
-    pollcodex -->|appends| sharedlog
+    pollcodex -->|appends| codexlog
 
-    sharedlog --> notebook
+    claudelog --> notebook
+    codexlog --> notebook
 ```
 
-Two independent write paths feed the same log, disambiguated by `source`:
-the free per-render push (`claude_statusline`, rides existing traffic) and
-the fixed-cadence poll (`claude`/`codex`, this account's only caller of
-those endpoints). The coupling between the render path and the poll path is
-entirely file-based — a heartbeat file and the shared log — never a direct
-script call in either direction; see "Quota tracking" below for why each
-writer exists.
+Two independent write paths feed `claude-quota-history.jsonl`, disambiguated
+by `source`: the free per-render push (`claude_statusline`, rides existing
+traffic) and the fixed-cadence poll (`claude`, this account's only caller of
+that endpoint). `codex-quota-history.jsonl` has a single writer,
+`poll_codex.py` — Codex has no equivalent free per-render push (see "Quota
+tracking" below for why). The coupling between the render path and the poll
+path is entirely file-based — a heartbeat file and a per-provider log —
+never a direct script call in either direction; see "Quota tracking" below
+for why each writer exists.
 
 ## Runtime layout
 
 Deploys shared code and state under `~/opt/agent-statusline/`:
 
     ~/opt/agent-statusline/
-    ├── lib/                              shared cache, formatting, and refresh scripts
+    ├── lib/
+    │   ├── statusline-cache.sh           shared lazy-cache primitives (stale-while-revalidate, locking)
+    │   ├── statusline-format.sh          shared ANSI styling and segment formatting
+    │   ├── statusline-push-claude-quota.sh     pushes live rate_limits to the claude quota log
+    │   ├── statusline-refresh-claude-quota.sh  fallback: reads the claude quota log
+    │   ├── statusline-refresh-git-local.sh     branch/untracked/unstaged/staged/conflicts
+    │   ├── statusline-refresh-git-remote.sh    ahead/behind
+    │   └── statusline-refresh-metrics.sh       used/total/percent memory
     ├── adhoc_quotas_analysis/            deployed poll_claude.py, poll_codex.py, poll_all.py, recompute_*.py
     ├── data/
-    │   ├── quota-log.jsonl               shared poll + push quota log (see "Quota tracking")
+    │   ├── claude-quota-history.jsonl    Claude poll + push quota log (see "Quota tracking")
+    │   ├── codex-quota-history.jsonl     Codex poll quota log (see "Quota tracking")
     │   ├── token-events.jsonl            recomputed Claude token-usage detail (not scheduled, run by hand)
     │   └── codex-token-events.jsonl      recomputed Codex token-usage detail (not scheduled, run by hand)
     ├── state/
@@ -206,8 +219,8 @@ prefers the live `rate_limits` values already present on every render's stdin
 payload — no cache, no staleness, since it's exactly as fresh as Claude
 Code's own in-memory quota state. The 60s-TTL cache above is a fallback for
 the one case stdin can't cover (a session that hasn't sent its first message
-yet), reading the latest reading from the shared quota log
-(`~/opt/agent-statusline/data/quota-log.jsonl`) instead of fetching
+yet), reading the latest reading from the Claude quota log
+(`~/opt/agent-statusline/data/claude-quota-history.jsonl`) instead of fetching
 Anthropic's OAuth usage endpoint directly — see "Quota tracking" below for
 why. Soft-fails closed if that log doesn't exist yet, same as any other
 failed refresh.
@@ -220,16 +233,19 @@ because no separate stable local quota endpoint has been established -
 
 `adhoc_quotas_analysis/` (folded in from the former `agent-quota-tracker` repo, full git
 history preserved) empirically tracks both agents' quota percentages
-over time in one shared, append-only log:
-`~/opt/agent-statusline/data/quota-log.jsonl`. Three independent
-writers, disambiguated by a `source` field, because the underlying data has
-genuinely different persistence properties:
+over time in two append-only, per-provider logs:
+`~/opt/agent-statusline/data/claude-quota-history.jsonl` and
+`data/codex-quota-history.jsonl` (split from a single combined
+`data/quota-log.jsonl` on 2026-08-31 - see `adhoc_quotas_analysis/AGENTS.md`'s
+"Naming history"). Three independent writers across the two files,
+disambiguated within `claude-quota-history.jsonl` by a `source` field,
+because the underlying data has genuinely different persistence properties:
 
-| `source` | Writer | Cadence | Why it exists |
-|---|---|---|---|
-| `claude` | `adhoc_quotas_analysis/poll_claude.py` (LaunchAgent, `GET /api/oauth/usage`) | ~60s while a statusline is live, ~5min idle | That endpoint has no history - a missed reading is permanently lost. Unreliable (~21% 429 rate historically; can lock out for 3+ days - see `adhoc_quotas_analysis/AGENTS.md`). |
-| `codex` | `adhoc_quotas_analysis/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`heartbeat/codex`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
-| `claude_statusline` | `lib/statusline-push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
+| File | `source` | Writer | Cadence | Why it exists |
+|---|---|---|---|---|
+| `claude-quota-history.jsonl` | `claude` | `adhoc_quotas_analysis/poll_claude.py` (LaunchAgent, `GET /api/oauth/usage`) | ~60s while a statusline is live, ~5min idle | That endpoint has no history - a missed reading is permanently lost. Unreliable (~21% 429 rate historically; can lock out for 3+ days - see `adhoc_quotas_analysis/AGENTS.md`). |
+| `claude-quota-history.jsonl` | `claude_statusline` | `lib/statusline-push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
+| `codex-quota-history.jsonl` | `codex` | `adhoc_quotas_analysis/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`heartbeat/codex`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
 
 Every `claude`/`codex` row also feeds `analysis.ipynb`'s research into what
 these percentages actually mean (they track dollar-weighted API cost, not
@@ -278,8 +294,8 @@ Statusline architecture (runs on every render):
 - `lib/statusline-cache.sh`: paths, freshness, locking, timeouts, and atomic writes.
 - `lib/statusline-format.sh`: shared colors, bars, limits, and Git formatting.
 - `lib/statusline-refresh-*.sh`: one bounded refresh attempt, without cache policy.
-- `lib/statusline-refresh-claude-quota.sh`: reads the latest `claude` poll reading from the shared quota log - fallback path only, see "Quota tracking".
-- `lib/statusline-push-claude-quota.sh`: appends a `claude_statusline` row to the shared quota log from live stdin `rate_limits` - the primary path.
+- `lib/statusline-refresh-claude-quota.sh`: reads the latest `claude` poll reading from the Claude quota log - fallback path only, see "Quota tracking".
+- `lib/statusline-push-claude-quota.sh`: appends a `claude_statusline` row to the Claude quota log from live stdin `rate_limits` - the primary path.
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout.
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
 - `install.sh` + `utils.sh`: deployment, legacy-runtime migration, quota-poller/LaunchAgent deployment, and Codex config wiring.
@@ -287,6 +303,7 @@ Statusline architecture (runs on every render):
 Quota tracking (see "Quota tracking" above; own deep-dive docs in `adhoc_quotas_analysis/AGENTS.md`):
 
 - `adhoc_quotas_analysis/poll_claude.py` / `adhoc_quotas_analysis/poll_codex.py` / `adhoc_quotas_analysis/poll_all.py`: the LaunchAgent-scheduled pollers.
+- `adhoc_quotas_analysis/split_quota_log.py`: one-time, idempotent migration from the old combined `data/quota-log.jsonl` to the two per-provider files - run automatically by `install.sh`.
 - `adhoc_quotas_analysis/recompute_token_events.py` / `adhoc_quotas_analysis/recompute_codex_events.py`: not scheduled, run by hand to rebuild per-event token-usage detail from local transcripts.
 - `adhoc_quotas_analysis/analysis.ipynb`: the research notebook - what the quota percentages actually track.
 

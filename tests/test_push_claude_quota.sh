@@ -10,7 +10,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 PUSH="$REPO_ROOT/lib/statusline-push-claude-quota.sh"
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-pushhome.XXXXXX")"
 trap 'rm -rf "$TH_HOME"' EXIT
-LOG="$TH_HOME/opt/agent-statusline/data/quota-log.jsonl"
+LOG="$TH_HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
 TRANSCRIPT="$TH_HOME/transcript.jsonl"
 
 write_log() { mkdir -p "$(dirname "$LOG")"; printf '%s\n' "$1" > "$LOG"; }

@@ -91,10 +91,10 @@ assert_contains "reports the migration" "$TH_OUT" "migrated from ~/opt/agent-quo
 assert_file_missing "the old deployed folder is gone" "$old_folder"
 assert_file_missing "the old LaunchAgent symlink is removed" \
     "$th_home/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist"
-assert_file_exists "its data/ is carried forward" \
+assert_file_missing "its data/ is carried forward, then immediately split by the per-provider migration below" \
     "$th_home/opt/agent-statusline/data/quota-log.jsonl"
 assert_contains "carried-forward content is preserved, not regenerated" \
-    "$(cat "$th_home/opt/agent-statusline/data/quota-log.jsonl")" '"ts":1'
+    "$(cat "$th_home/opt/agent-statusline/data/claude-quota-history.jsonl")" '"ts":1'
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_not_contains "no migration message on a second run - old folder is already gone" \
@@ -117,21 +117,51 @@ assert_not_contains "no cleanup message on a second run - old dir is already gon
     "$TH_OUT" "removed orphaned"
 rm -rf "$th_home"
 
-section "renames a pre-existing data/utilization-log.jsonl to quota-log.jsonl"
+section "renames a pre-existing data/utilization-log.jsonl to quota-log.jsonl, then splits it by provider"
+# Both one-time migrations run back to back in a single install, so a
+# deployment still on the oldest name goes straight from
+# utilization-log.jsonl to the two current per-provider files in one pass -
+# nothing is ever left sitting on the intermediate quota-log.jsonl name.
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
 mkdir -p "$th_home/opt/agent-statusline/data"
-printf '{"ts":1,"source":"claude","api":{}}\n' > "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
+printf '{"ts":1,"source":"claude","api":{}}\n{"ts":2,"source":"codex","codex_rate_limits":{}}\n' \
+    > "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_contains "reports the rename" "$TH_OUT" "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
-assert_file_missing "the old filename is gone" "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
-assert_file_exists "the new filename exists" "$th_home/opt/agent-statusline/data/quota-log.jsonl"
-assert_contains "renamed content is preserved, not regenerated" \
-    "$(cat "$th_home/opt/agent-statusline/data/quota-log.jsonl")" '"ts":1'
+assert_contains "reports the split" "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
+assert_file_missing "the oldest filename is gone" "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
+assert_file_missing "the intermediate filename is gone" "$th_home/opt/agent-statusline/data/quota-log.jsonl"
+assert_contains "the claude row landed in claude-quota-history.jsonl" \
+    "$(cat "$th_home/opt/agent-statusline/data/claude-quota-history.jsonl")" '"ts":1'
+assert_contains "the codex row landed in codex-quota-history.jsonl" \
+    "$(cat "$th_home/opt/agent-statusline/data/codex-quota-history.jsonl")" '"ts":2'
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_not_contains "no rename message on a second run - new filename already exists" \
+assert_not_contains "no rename message on a second run - old filenames are already gone" \
     "$TH_OUT" "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
+assert_not_contains "no split message on a second run - already split" \
+    "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
+rm -rf "$th_home"
+
+section "splits an already-current-named data/quota-log.jsonl with no legacy utilization-log.jsonl"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/opt/agent-statusline/data"
+printf '{"ts":1,"source":"claude","api":{}}\n{"ts":2,"source":"codex","codex_rate_limits":{}}\n{"ts":3}\n' \
+    > "$th_home/opt/agent-statusline/data/quota-log.jsonl"
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "reports the split" "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
+assert_file_missing "the combined filename is gone" "$th_home/opt/agent-statusline/data/quota-log.jsonl"
+claude_content="$(cat "$th_home/opt/agent-statusline/data/claude-quota-history.jsonl")"
+assert_contains "explicit claude row lands in the claude file" "$claude_content" '"ts":1'
+assert_contains "a sourceless row defaults to claude" "$claude_content" '"ts":3'
+assert_contains "the codex row lands in the codex file" \
+    "$(cat "$th_home/opt/agent-statusline/data/codex-quota-history.jsonl")" '"ts":2'
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_not_contains "no split message on a second run - already split" \
+    "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
 rm -rf "$th_home"
 
 section "orphaned pre-2026-08-30 usage-fetch helper is removed"

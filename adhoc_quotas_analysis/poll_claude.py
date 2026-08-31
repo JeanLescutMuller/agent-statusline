@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Samples Anthropic's utilization API on a timer, because that side has no
 history - a missed reading is permanently lost. Appends one record per run
-to data/quota-log.jsonl: the full raw GET /api/oauth/usage response,
+to data/claude-quota-history.jsonl: the full raw GET /api/oauth/usage response,
 unfiltered, plus its HTTP response headers - or, when the reading can't be
 taken, an `error` object saying which stage failed and why. A missing
 reading is itself data (roughly 11% of rows historically), and "the token
@@ -36,7 +36,9 @@ the primary one: ../lib/statusline-push-claude-quota.sh pushes a free
 Claude Code's own in-memory rate_limits state - no network call, never
 rate-limited. This poller still matters for the gap that push path can't
 cover: a session that hasn't sent its first message yet, or a stretch with
-no statusline rendering anywhere on the machine at all.
+no statusline rendering anywhere on the machine at all. Both sources share
+this same claude-quota-history.jsonl file (Codex has its own,
+codex-quota-history.jsonl - see poll_codex.py).
 """
 import json
 import subprocess
@@ -49,7 +51,7 @@ from pathlib import Path
 # runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
 # parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-QUOTA_LOG_FILE = DATA_DIR / "quota-log.jsonl"
+QUOTA_LOG_FILE = DATA_DIR / "claude-quota-history.jsonl"
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -109,7 +111,7 @@ def fetch_usage(token: str) -> tuple[dict | None, dict | None, dict | None]:
             # anthropic-version) fingerprint this as a raw script hitting an
             # internal OAuth-only endpoint, unlike anything the real client
             # ever sends. Untested hypothesis: worth an honest data point,
-            # not a confirmed fix - see data/quota-log.jsonl going
+            # not a confirmed fix - see data/claude-quota-history.jsonl going
             # forward.
             "anthropic-version": "2023-06-01",
             "Accept": "application/json",
@@ -193,14 +195,18 @@ def _last_log_row() -> dict | None:
 
 
 def _last_claude_log_row() -> dict | None:
-    """The last logged row from THIS poller specifically. poll_all.py
-    interleaves Claude and Codex rows in the same file (see its docstring),
-    so scanning back past intervening Codex rows is required here - reading
-    the literal last line missed a real Retry-After backoff for a full tick
-    once already (2026-08-30: a Codex row landed as the tail seconds before
-    this ran, its `error` was silently treated as "no backoff active", and
-    the poller polled straight into a live 429 lockout it should have been
-    sitting out - the whole point of the backoff check below)."""
+    """The last logged row from THIS poller specifically, not from
+    ../lib/statusline-push-claude-quota.sh's frequent claude_statusline
+    pushes into the same claude-quota-history.jsonl file - scanning back
+    past intervening push rows is required here, reading the literal last
+    line missed a real Retry-After backoff for a full tick once already
+    (2026-08-30, back when this file also interleaved Codex rows: a Codex
+    row landed as the tail seconds before this ran, its `error` was
+    silently treated as "no backoff active", and the poller polled straight
+    into a live 429 lockout it should have been sitting out - the whole
+    point of the backoff check below. The Codex interleaving is gone since
+    the 2026-08-31 per-provider file split, but the same discipline still
+    applies to claude_statusline rows within this file, so the filter stays)."""
     for row in reversed(_tail_rows()):
         if row.get("source", "claude") == "claude":
             return row

@@ -1,11 +1,12 @@
 #!/bin/bash
-# Appends a Claude quota reading to the shared quota log whenever the
-# statusline's stdin payload carries a genuinely newer observation than the
-# last one this same push path logged. Free: rides `rate_limits`, already
-# present on every render's stdin payload, no network call of its own. See
-# adhoc_quotas_analysis/AGENTS.md's "GET /api/oauth/usage 429s" investigation for why this
-# exists - the poller's endpoint is unreliable (~21% 429 rate), this path
-# never is.
+# Appends a Claude quota reading to data/claude-quota-history.jsonl
+# (shared with adhoc_quotas_analysis/poll_claude.py, disambiguated by
+# `source`) whenever the statusline's stdin payload carries a genuinely
+# newer observation than the last one this same push path logged. Free:
+# rides `rate_limits`, already present on every render's stdin payload, no
+# network call of its own. See adhoc_quotas_analysis/AGENTS.md's
+# "GET /api/oauth/usage 429s" investigation for why this exists - the
+# poller's endpoint is unreliable (~21% 429 rate), this path never is.
 #
 # Called unconditionally on every render, deliberately NOT gated by the
 # usual TTL/lock cache machinery in statusline-cache.sh - it must catch a
@@ -22,7 +23,7 @@ week_pct="${4:-}" week_reset="${5:-}"
 
 [ -n "$transcript_path" ] && [ -f "$transcript_path" ] || exit 0
 
-log_file="$HOME/opt/agent-statusline/data/quota-log.jsonl"
+log_file="$HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
 
 # Some trailing transcript entries (snapshot/compact bookkeeping) carry no
 # `timestamp` - scan back a few lines for the last one that does. observed_at
@@ -42,11 +43,12 @@ observed_at="$(tail -n 20 "$transcript_path" 2>/dev/null | jq -n -r '
 
 mkdir -p "$(dirname "$log_file")"
 
-# Compare against this push path's OWN last row specifically - the shared
-# log interleaves claude/codex/claude_statusline rows, and reading just the
-# tail line can silently compare against the wrong source. poll_claude.py
-# hit exactly this bug once (see adhoc_quotas_analysis/AGENTS.md's `_last_claude_log_row`
-# gotcha) - same discipline applies here.
+# Compare against this push path's OWN last row specifically - this file
+# also carries adhoc_quotas_analysis/poll_claude.py's `claude` poll rows,
+# and reading just the tail line can silently compare against the wrong
+# source. poll_claude.py hit exactly this bug once (see
+# adhoc_quotas_analysis/AGENTS.md's `_last_claude_log_row` gotcha) - same
+# discipline applies here.
 last_observed_at="$(tail -n 200 "$log_file" 2>/dev/null | jq -n -r '
     [inputs | select(.source == "claude_statusline")]
     | if length == 0 then empty else last end

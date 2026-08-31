@@ -13,7 +13,7 @@ SEP=$'\034'
 
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-quotahome.XXXXXX")"
 trap 'rm -rf "$TH_HOME"' EXIT
-LOG="$TH_HOME/opt/agent-statusline/data/quota-log.jsonl"
+LOG="$TH_HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
 
 epoch_of() {
     python3 -c "
