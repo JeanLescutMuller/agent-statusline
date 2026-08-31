@@ -152,7 +152,7 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     │   ├── statusline-refresh-git-local.sh     branch/untracked/unstaged/staged/conflicts
     │   ├── statusline-refresh-git-remote.sh    ahead/behind
     │   └── statusline-refresh-metrics.sh       used/total/percent memory
-    ├── adhoc_quotas_analysis/            deployed poll_claude.py, poll_codex.py, poll_all.py, recompute_*.py
+    ├── adhoc_quotas_analysis/            deployed poll_claude.py, poll_codex.py, poll_all.py, split_quota_log.py, recompute_*.py
     ├── data/
     │   ├── claude-quota-history.jsonl    Claude poll + push quota log (see "Quota tracking")
     │   ├── codex-quota-history.jsonl     Codex poll quota log (see "Quota tracking")
