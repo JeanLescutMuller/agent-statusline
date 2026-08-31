@@ -42,89 +42,96 @@ Three independent mandates share this repo:
   point it doesn't ship with on the pinned version. Build-time only; nothing
   in it runs on a render.
 
+The diagram below is the **runtime view only** — what actually runs when a
+session renders its statusline, and what the quota LaunchAgent does on its
+own schedule. `install.sh`/`utils.sh` (deploy-time) and `codex-patch/`
+(build-time, one-off, never invoked on a render) are covered in their own
+sections instead of diagrammed here.
+
 ```mermaid
 flowchart TB
-    subgraph arch["Statusline architecture — runs every render"]
-        direction TB
-        installsh["install.sh + utils.sh"]
-        libcache["lib/statusline-cache.sh"]
-        libformat["lib/statusline-format.sh"]
-        librefresh["lib/statusline-refresh-*.sh"]
-        libpush["lib/statusline-push-claude-quota.sh"]
-        provclaude["providers/claude-statusline-command.sh"]
-        provcodex["providers/codex-statusline-command.sh"]
+    claudeS(["Claude Code sessions (N)"])
+    codexS(["Codex TUI sessions (N)"])
+
+    provclaude["providers/claude-statusline-command.sh
+    one process per render, same script for every session"]
+    provcodex["providers/codex-statusline-command.sh
+    one process per render (~4s), same script for every session"]
+
+    sharedlib[["lib/statusline-cache.sh
+    lib/statusline-format.sh"]]
+
+    subgraph state["~/opt/agent-statusline/state/ — shared cache files"]
+        direction LR
+        hbC[("providers/claude.heartbeat")]
+        hbX[("providers/codex.heartbeat")]
+        ccC[("providers/claude
+        60s fallback cache")]
+        ccX[("providers/codex
+        60s cache")]
+        ccOther[("system/metrics, git/&lt;cwd&gt;/*, static/*
+        shared by both providers")]
     end
 
-    subgraph quota["quota/ — LaunchAgent poll + notebook research"]
+    pushscript["lib/statusline-push-claude-quota.sh
+    runs when stdin has rate_limits, no network call"]
+    refreshscript["lib/statusline-refresh-claude-quota.sh
+    fallback: no rate_limits yet this session"]
+
+    sharedlog[("data/utilization-log.jsonl
+    3 sources: claude / codex / claude_statusline")]
+
+    subgraph pollers["Scheduled — LaunchAgent, every 60s"]
         direction TB
-        quotalaunchd["LaunchAgent, every 60s"]
         pollall["poll_all.py"]
         pollclaude["poll_claude.py"]
         pollcodex["poll_codex.py"]
-        sharedlog[("data/utilization-log.jsonl")]
-        notebook["analysis.ipynb"]
     end
 
-    subgraph patch["codex-patch/ — build-time, one-off"]
-        direction TB
-        patchinstall["install-codex-statusline-patch.sh"]
-        patchfiles["patches/codex-version.patch"]
-        patchtoml["codex_tui.toml"]
-    end
+    anthropicusage["Anthropic
+    GET /api/oauth/usage"]
+    codexrpc["codex app-server
+    JSON-RPC"]
+    notebook["quota/analysis.ipynb
+    research, run by hand"]
 
-    upstream["openai/codex repo, pinned commit"]
-    codexbin["~/.codex/packages/standalone/current"]
-    claudecode(["Claude Code"])
-    codextui(["Codex TUI, patched binary"])
-    anthropicusage["GET /api/oauth/usage"]
+    claudeS -->|renders| provclaude
+    codexS -->|"status_line_command"| provcodex
 
-    installsh --> libcache
-    installsh --> libformat
-    installsh --> librefresh
-    installsh --> libpush
-    installsh --> provclaude
-    installsh --> provcodex
-    installsh -->|"deploys + bootstraps"| quotalaunchd
-    installsh -->|"if codex on PATH"| patchinstall
-    installsh -->|"merges [tui] keys into config.toml"| patchtoml
+    provclaude --> sharedlib
+    provcodex --> sharedlib
+    sharedlib --> ccOther
 
-    patchinstall --> patchfiles
-    patchinstall --> upstream
-    patchinstall --> codexbin
+    provclaude -->|touches every render| hbC
+    provcodex -->|touches every render| hbX
 
-    provclaude --> libcache
-    provclaude --> libformat
-    provclaude --> librefresh
-    provclaude -->|"pushes rate_limits, no network call"| libpush
-    provcodex --> libcache
-    provcodex --> libformat
-    provcodex --> librefresh
+    provclaude -->|"rate_limits on stdin"| pushscript
+    pushscript -->|appends| sharedlog
+    provclaude -.->|"no rate_limits yet"| refreshscript
+    refreshscript -.->|reads latest claude row| sharedlog
+    provclaude -.->|read/write| ccC
 
-    libpush --> sharedlog
-    librefresh -->|"reads the latest reading"| sharedlog
-    quotalaunchd --> pollall
+    provcodex -->|writes payload snapshot| ccX
+
     pollall --> pollclaude
     pollall --> pollcodex
-    pollclaude -->|"~21% 429 rate - see quota/AGENTS.md"| anthropicusage
-    pollclaude --> sharedlog
-    pollcodex --> sharedlog
-    sharedlog --> notebook
+    pollclaude -.->|checks freshness| hbC
+    pollclaude -->|"~60s watched, ~5min idle"| anthropicusage
+    pollclaude -->|appends| sharedlog
+    pollcodex -.->|checks freshness| hbX
+    pollcodex -->|"~60s watched, ~5min idle"| codexrpc
+    pollcodex -->|appends| sharedlog
 
-    claudecode -->|"renders statusline"| provclaude
-    codextui -->|"status_line_command every 4s"| provcodex
+    sharedlog --> notebook
 ```
 
-`install.sh` is the only thing that reaches into all three mandates: it
-deploys the statusline architecture and the quota poller/LaunchAgent
-unconditionally, then conditionally drives the Codex patch. Nothing under
-`codex-patch/` is sourced by `lib/` or `providers/`, and nothing under
-`lib/`/`providers/` is sourced by `codex-patch/` — those two trees don't call
-into each other at runtime. `quota/`'s coupling to `lib/`/`providers/` is
-one-directional and file-based, not source-level: `lib/statusline-push-claude-quota.sh`
-and `lib/statusline-refresh-claude-quota.sh` read/write the same
-`data/utilization-log.jsonl` that `quota/poll_claude.py` and
-`quota/poll_codex.py` do, but no script in either tree invokes a script in
-the other.
+Two independent write paths feed the same log, disambiguated by `source`:
+the free per-render push (`claude_statusline`, rides existing traffic) and
+the fixed-cadence poll (`claude`/`codex`, this account's only caller of
+those endpoints). The coupling between the render path and the poll path is
+entirely file-based — a heartbeat file and the shared log — never a direct
+script call in either direction; see "Quota tracking" below for why each
+writer exists.
 
 ## Runtime layout
 
