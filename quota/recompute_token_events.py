@@ -24,7 +24,10 @@ import json
 import time
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+# quota/ is deployed as a sibling of data/ under the shared agent-statusline
+# runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
+# parent, or this would look for a nonexistent quota/data/.
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 EVENTS_LOG_FILE = DATA_DIR / "token-events.jsonl"
 TRANSCRIPTS_DIR = Path.home() / ".claude" / "projects"
 
