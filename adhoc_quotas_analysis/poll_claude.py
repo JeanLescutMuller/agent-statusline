@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Samples Anthropic's utilization API on a timer, because that side has no
 history - a missed reading is permanently lost. Appends one record per run
-to data/utilization-log.jsonl: the full raw GET /api/oauth/usage response,
+to data/quota-log.jsonl: the full raw GET /api/oauth/usage response,
 unfiltered, plus its HTTP response headers - or, when the reading can't be
 taken, an `error` object saying which stage failed and why. A missing
 reading is itself data (roughly 11% of rows historically), and "the token
@@ -45,11 +45,11 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-# quota/ is deployed as a sibling of data/ under the shared agent-statusline
+# adhoc_quotas_analysis/ is deployed as a sibling of data/ under the shared agent-statusline
 # runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
-# parent, or this would look for a nonexistent quota/data/.
+# parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-UTIL_LOG_FILE = DATA_DIR / "utilization-log.jsonl"
+QUOTA_LOG_FILE = DATA_DIR / "quota-log.jsonl"
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -109,7 +109,7 @@ def fetch_usage(token: str) -> tuple[dict | None, dict | None, dict | None]:
             # anthropic-version) fingerprint this as a raw script hitting an
             # internal OAuth-only endpoint, unlike anything the real client
             # ever sends. Untested hypothesis: worth an honest data point,
-            # not a confirmed fix - see data/utilization-log.jsonl going
+            # not a confirmed fix - see data/quota-log.jsonl going
             # forward.
             "anthropic-version": "2023-06-01",
             "Accept": "application/json",
@@ -163,9 +163,9 @@ def _is_active(now: float) -> bool:
 def _tail_rows() -> list[dict]:
     """Parsed rows from the tail of the log, newest last - shared by both
     lookups below so there's one place doing the truncation-tolerant read."""
-    if not UTIL_LOG_FILE.exists():
+    if not QUOTA_LOG_FILE.exists():
         return []
-    with UTIL_LOG_FILE.open("rb") as f:
+    with QUOTA_LOG_FILE.open("rb") as f:
         f.seek(0, 2)
         size = f.tell()
         chunk = min(size, 16384)
@@ -246,7 +246,7 @@ def main() -> None:
         "api_headers": d_api_headers,
         "error": d_error,  # None on success; why the reading is missing otherwise
     }
-    with UTIL_LOG_FILE.open("a") as f:
+    with QUOTA_LOG_FILE.open("a") as f:
         f.write(json.dumps(d_record) + "\n")
 
 

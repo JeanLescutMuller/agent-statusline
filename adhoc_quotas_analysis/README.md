@@ -6,7 +6,7 @@ tracking" section for how this fits into the rest of that repo, and this
 directory's own `AGENTS.md` for the full investigation history). This file
 covers what's specific to the pollers and the research notebook.
 
-Empirically reverse-engineers how coding-agent usage-limit percentages
+Empirically reverse-engineers how coding-agent quota percentages
 (Claude Code's `five_hour` / `seven_day` utilization, and — since
 2026-08-30 — Codex's structurally identical `primary` / `secondary`
 rate limits) relate to actual usage, since neither vendor publishes the
@@ -105,7 +105,7 @@ share a failure mode:
 
 ### `poll_claude.py` + `poll_codex.py` — the parts that run on a timer
 
-Deployed to `~/opt/agent-statusline/quota/`, scheduled via
+Deployed to `~/opt/agent-statusline/adhoc_quotas_analysis/`, scheduled via
 `agent-statusline`'s single launchd LaunchAgent (`com.jeanlescut.agent-statusline`,
 ticking every 60s — see the parent repo's `install.sh`) that runs
 `poll_all.py`, which in turn runs each poller as its own subprocess (so one
@@ -153,7 +153,7 @@ JSON-RPC method on `codex app-server` (the same protocol its own TUI
 statusline uses), so it spawns `codex app-server --stdio`, does the
 `initialize` handshake, then calls `account/rateLimits/read` and
 `account/usage/read`. Both append one record each to the same
-`data/utilization-log.jsonl`, disambiguated by a `source` field.
+`data/quota-log.jsonl`, disambiguated by a `source` field.
 
 This side **must** be polled: neither endpoint has history. A missed
 reading is a permanently lost one — there is no way to ask "what was my
@@ -199,20 +199,20 @@ table above).
 ## Setup
 
 ```bash
-cd ../  # this is quota/ - install.sh lives at the agent-statusline repo root
+cd ../  # this is adhoc_quotas_analysis/ - install.sh lives at the agent-statusline repo root
 ./install.sh
 ```
 
 Idempotent — deploys the three poll/dispatch scripts plus the two
-`recompute_*.py` scripts to `~/opt/agent-statusline/quota/`,
+`recompute_*.py` scripts to `~/opt/agent-statusline/adhoc_quotas_analysis/`,
 writes/refreshes the `com.jeanlescut.agent-statusline` LaunchAgent plist, and
 (re)loads it via `launchctl bootstrap`. Self-migrating: on a machine that
 still has a standalone `agent-quota-tracker` deployment, detects it (see
 `AGENTS.md`'s naming history) and folds it in automatically, carrying
-`data/utilization-log.jsonl` forward and retiring its LaunchAgent.
+`data/quota-log.jsonl` forward and retiring its LaunchAgent.
 
 ```bash
-python3 ~/opt/agent-statusline/quota/recompute_token_events.py
+python3 ~/opt/agent-statusline/adhoc_quotas_analysis/recompute_token_events.py
 ```
 
 Run this before any analysis session — it's what populates/refreshes
@@ -220,11 +220,11 @@ Run this before any analysis session — it's what populates/refreshes
 
 ## Data files
 
-Live under `~/opt/agent-statusline/data/` (a sibling of `quota/` in the
+Live under `~/opt/agent-statusline/data/` (a sibling of `adhoc_quotas_analysis/` in the
 deployed runtime, not nested under it, and not this source checkout — see
 the dev-wide convention in `~/dev/CLAUDE.md`).
 
-**`utilization-log.jsonl`** — one record per poll tick, shared by both
+**`quota-log.jsonl`** — one record per poll tick, shared by both
 pollers, disambiguated by `source` (added 2026-08-30; rows before that
 have no `source` key — they're all Claude). Claude rows:
 ```jsonc

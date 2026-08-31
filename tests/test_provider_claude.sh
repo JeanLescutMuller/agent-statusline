@@ -4,7 +4,7 @@
 # point at an isolated temp runtime, and a captured payload is piped in.
 #
 # HOME is also overridden per call. The script hardcodes
-# $HOME/opt/agent-quota-tracker/data/utilization-log.jsonl for its live quota
+# $HOME/opt/agent-quota-tracker/data/quota-log.jsonl for its live quota
 # refresh (see lib/statusline-refresh-claude-quota.sh - test_refresh_claude_quota.sh
 # covers that script directly) and $HOME/opt/bootstrap-home/bin/get_host_color
 # for the host color - pointing HOME at an empty temp dir makes both misses
@@ -75,7 +75,7 @@ run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 quota_cache="$STATUSLINE_RUNTIME_DIR/state/providers/claude"
 assert_file_exists "first call seeds the quota cache from the payload" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "55"
-assert_file_exists "every render touches the liveness heartbeat quota/poll_claude.py polls faster against" \
+assert_file_exists "every render touches the liveness heartbeat adhoc_quotas_analysis/poll_claude.py polls faster against" \
     "$STATUSLINE_RUNTIME_DIR/state/providers/claude.heartbeat"
 
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"

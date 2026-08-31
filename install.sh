@@ -4,7 +4,7 @@
 # Deploys the shared cache/format library and the Claude/Codex provider
 # adapters, migrates any pre-existing bootstrap-home statusline runtime state,
 # deploys the quota-tracking pollers (folded in from the former
-# agent-quota-tracker repo - see quota/AGENTS.md) and their LaunchAgent, and -
+# agent-quota-tracker repo - see adhoc_quotas_analysis/AGENTS.md) and their LaunchAgent, and -
 # when Codex is installed - builds/deploys the status-line-command patch and
 # wires ~/.codex/config.toml's [tui] status-line keys.
 #
@@ -71,9 +71,9 @@ else
 fi
 
 step "quota tracker"
-mkdir -p "$RUNTIME/quota" "$RUNTIME/data"
-for f in "$SCRIPT_DIR"/quota/*.py; do
-    _deploy "$f" "$RUNTIME/quota/$(basename "$f")"
+mkdir -p "$RUNTIME/adhoc_quotas_analysis" "$RUNTIME/data"
+for f in "$SCRIPT_DIR"/adhoc_quotas_analysis/*.py; do
+    _deploy "$f" "$RUNTIME/adhoc_quotas_analysis/$(basename "$f")"
 done
 
 # One-time: fold in agent-quota-tracker's live deployment. Its own
@@ -116,7 +116,7 @@ cat > "$QUOTA_PLIST_TMP" <<PLIST
     <key>ProgramArguments</key>
     <array>
         <string>$PYTHON3</string>
-        <string>$RUNTIME/quota/poll_all.py</string>
+        <string>$RUNTIME/adhoc_quotas_analysis/poll_all.py</string>
     </array>
 
     <!-- Tick every 60s - NOT the same as polling every 60s. Both pollers

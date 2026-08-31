@@ -72,7 +72,7 @@ if [ ! -f "$quota_cache" ]; then
 fi
 # Live stdin values win whenever this render actually has rate_limits -
 # they're the freshest signal there is (see the push call above and
-# quota/AGENTS.md §6). The cache overlay is a fallback for the one case
+# adhoc_quotas_analysis/AGENTS.md §6). The cache overlay is a fallback for the one case
 # stdin can't cover: a session that hasn't sent its first message yet.
 if [ "$has_rate_limits" != "true" ] && [ -f "$quota_cache" ]; then
     IFS="$STATUSLINE_FIELD_SEPARATOR" read -r cached_five_pct cached_five_reset \

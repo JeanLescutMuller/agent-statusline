@@ -13,12 +13,12 @@ while IFS= read -r -d '' f; do
     assert_status "$rel has valid syntax" 0 "$TH_STATUS"
 done < <(find "$REPO_ROOT" -name '*.sh' -not -path '*/.git/*' -print0)
 
-section "every quota/ Python script compiles (python3 -m py_compile)"
+section "every adhoc_quotas_analysis/ Python script compiles (python3 -m py_compile)"
 while IFS= read -r -d '' f; do
     rel="${f#"$REPO_ROOT"/}"
     th_run python3 -m py_compile "$f"
     assert_status "$rel has valid syntax" 0 "$TH_STATUS"
-done < <(find "$REPO_ROOT/quota" -name '*.py' -print0)
+done < <(find "$REPO_ROOT/adhoc_quotas_analysis" -name '*.py' -print0)
 
 section "shellcheck (if available)"
 if command -v shellcheck >/dev/null 2>&1; then

@@ -7,15 +7,15 @@
 # live stdin `rate_limits` payload directly (see
 # lib/statusline-push-claude-quota.sh), falling back to this cached value
 # only for a session that hasn't sent its first message yet. Reads the
-# latest reading from quota/poll_claude.py's shared log instead of hitting
+# latest reading from adhoc_quotas_analysis/poll_claude.py's shared log instead of hitting
 # Anthropic's usage endpoint directly - that poller is this account's single
 # fixed-cadence, session-count-independent caller of that endpoint (see
-# quota/AGENTS.md); a second independent poller here duplicated that traffic
+# adhoc_quotas_analysis/AGENTS.md); a second independent poller here duplicated that traffic
 # and caused 429s during busy multi-session hours.
 set -uo pipefail
 
 separator=$'\034'
-log_file="$HOME/opt/agent-statusline/data/utilization-log.jsonl"
+log_file="$HOME/opt/agent-statusline/data/quota-log.jsonl"
 
 fail_read() {
     printf 'Claude quota read: %s\n' "$1" >&2

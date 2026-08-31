@@ -45,15 +45,15 @@ diff -q "$REPO_ROOT/lib/statusline-cache.sh" "$th_home/opt/agent-statusline/lib/
 assert_status "deployed lib matches the repo source" 0 $?
 
 section "deploys the quota pollers and their LaunchAgent"
-assert_file_exists "poll_claude.py deployed under ~/opt/agent-statusline/quota" \
-    "$th_home/opt/agent-statusline/quota/poll_claude.py"
-assert_file_exists "poll_codex.py deployed" "$th_home/opt/agent-statusline/quota/poll_codex.py"
-assert_file_exists "poll_all.py deployed" "$th_home/opt/agent-statusline/quota/poll_all.py"
+assert_file_exists "poll_claude.py deployed under ~/opt/agent-statusline/adhoc_quotas_analysis" \
+    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
+assert_file_exists "poll_codex.py deployed" "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_codex.py"
+assert_file_exists "poll_all.py deployed" "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_all.py"
 assert_file_exists "data/ created for the shared log" "$th_home/opt/agent-statusline/data"
 assert_file_exists "LaunchAgent plist written" \
     "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist"
-assert_contains "plist points at quota/poll_all.py" \
-    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist")" "quota/poll_all.py"
+assert_contains "plist points at adhoc_quotas_analysis/poll_all.py" \
+    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist")" "adhoc_quotas_analysis/poll_all.py"
 assert_eq "plist is symlinked into ~/Library/LaunchAgents, not copied" \
     "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist" \
     "$(readlink "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist")"
@@ -83,7 +83,7 @@ section "migrates agent-quota-tracker's live deployment"
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
 old_folder="$th_home/opt/agent-quota-tracker"
 mkdir -p "$old_folder/data" "$th_home/Library/LaunchAgents"
-printf '{"ts":1,"source":"claude","api":{}}\n' > "$old_folder/data/utilization-log.jsonl"
+printf '{"ts":1,"source":"claude","api":{}}\n' > "$old_folder/data/quota-log.jsonl"
 printf 'fake plist\n' > "$th_home/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist"
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
@@ -92,9 +92,9 @@ assert_file_missing "the old deployed folder is gone" "$old_folder"
 assert_file_missing "the old LaunchAgent symlink is removed" \
     "$th_home/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist"
 assert_file_exists "its data/ is carried forward" \
-    "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
+    "$th_home/opt/agent-statusline/data/quota-log.jsonl"
 assert_contains "carried-forward content is preserved, not regenerated" \
-    "$(cat "$th_home/opt/agent-statusline/data/utilization-log.jsonl")" '"ts":1'
+    "$(cat "$th_home/opt/agent-statusline/data/quota-log.jsonl")" '"ts":1'
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_not_contains "no migration message on a second run - old folder is already gone" \

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Samples Codex CLI's rate-limit/usage state on a timer, same rationale as
 poll_claude.py: this side has no history either, a missed reading is
-permanently lost. Appends one record per run to data/utilization-log.jsonl
+permanently lost. Appends one record per run to data/quota-log.jsonl
 (the same shared file poll_claude.py writes, disambiguated by `source`) -
 the full raw `account/rateLimits/read` and `account/usage/read` results,
 unfiltered, or an `error` object saying which stage failed and why.
@@ -62,11 +62,11 @@ import subprocess
 import time
 from pathlib import Path
 
-# quota/ is deployed as a sibling of data/ under the shared agent-statusline
+# adhoc_quotas_analysis/ is deployed as a sibling of data/ under the shared agent-statusline
 # runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
-# parent, or this would look for a nonexistent quota/data/.
+# parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-UTIL_LOG_FILE = DATA_DIR / "utilization-log.jsonl"
+QUOTA_LOG_FILE = DATA_DIR / "quota-log.jsonl"
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "providers" / "codex.heartbeat"
 
@@ -172,9 +172,9 @@ def _last_codex_log_ts() -> int | None:
     """Timestamp of the last codex-sourced row, read from the tail of the
     file rather than a full scan - this runs every tick, forever, and the
     log only grows."""
-    if not UTIL_LOG_FILE.exists():
+    if not QUOTA_LOG_FILE.exists():
         return None
-    with UTIL_LOG_FILE.open("rb") as f:
+    with QUOTA_LOG_FILE.open("rb") as f:
         f.seek(0, 2)
         size = f.tell()
         chunk = min(size, 16384)
@@ -259,7 +259,7 @@ def main() -> None:
         "codex_usage": d_usage,
         "error": d_error,  # None on success; why the reading is missing otherwise
     }
-    with UTIL_LOG_FILE.open("a") as f:
+    with QUOTA_LOG_FILE.open("a") as f:
         f.write(json.dumps(d_record) + "\n")
 
 

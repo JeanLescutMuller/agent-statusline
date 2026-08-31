@@ -57,7 +57,7 @@ run_codex "$FIXTURES/codex-payload.json" "$plain_dir"
 quota_cache="$STATUSLINE_RUNTIME_DIR/state/providers/codex"
 assert_file_exists "quota cache written from the payload" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "20"
-assert_file_exists "every render touches the liveness heartbeat quota/poll_codex.py polls faster against" \
+assert_file_exists "every render touches the liveness heartbeat adhoc_quotas_analysis/poll_codex.py polls faster against" \
     "$STATUSLINE_RUNTIME_DIR/state/providers/codex.heartbeat"
 
 section "carousel: page 1 (model/host/cwd)"

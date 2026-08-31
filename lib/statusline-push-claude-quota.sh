@@ -3,7 +3,7 @@
 # statusline's stdin payload carries a genuinely newer observation than the
 # last one this same push path logged. Free: rides `rate_limits`, already
 # present on every render's stdin payload, no network call of its own. See
-# quota/AGENTS.md's "GET /api/oauth/usage 429s" investigation for why this
+# adhoc_quotas_analysis/AGENTS.md's "GET /api/oauth/usage 429s" investigation for why this
 # exists - the poller's endpoint is unreliable (~21% 429 rate), this path
 # never is.
 #
@@ -22,7 +22,7 @@ week_pct="${4:-}" week_reset="${5:-}"
 
 [ -n "$transcript_path" ] && [ -f "$transcript_path" ] || exit 0
 
-log_file="$HOME/opt/agent-statusline/data/utilization-log.jsonl"
+log_file="$HOME/opt/agent-statusline/data/quota-log.jsonl"
 
 # Some trailing transcript entries (snapshot/compact bookkeeping) carry no
 # `timestamp` - scan back a few lines for the last one that does. observed_at
@@ -45,7 +45,7 @@ mkdir -p "$(dirname "$log_file")"
 # Compare against this push path's OWN last row specifically - the shared
 # log interleaves claude/codex/claude_statusline rows, and reading just the
 # tail line can silently compare against the wrong source. poll_claude.py
-# hit exactly this bug once (see quota/AGENTS.md's `_last_claude_log_row`
+# hit exactly this bug once (see adhoc_quotas_analysis/AGENTS.md's `_last_claude_log_row`
 # gotcha) - same discipline applies here.
 last_observed_at="$(tail -n 200 "$log_file" 2>/dev/null | jq -n -r '
     [inputs | select(.source == "claude_statusline")]

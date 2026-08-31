@@ -1,4 +1,4 @@
-# agent-quota-tracker — project notes
+# adhoc_quotas_analysis — deep-dive notes
 
 This file (`AGENTS.md`, the cross-agent-tool convention — `CLAUDE.md` is a
 symlink to it for Claude Code) is for whichever coding-agent session picks
@@ -10,7 +10,7 @@ so a fresh session doesn't have to re-derive any of it.
 ## What this project is
 
 **As of 2026-08-30 this project tracks Claude Code and Codex.** Two
-pollers write to the same `data/utilization-log.jsonl`, disambiguated by
+pollers write to the same `data/quota-log.jsonl`, disambiguated by
 a `source` field: `poll_claude.py` (renamed from `poll.py` — hits
 Anthropic's `GET /api/oauth/usage`, see below) and `poll_codex.py` (new —
 Codex has no plain HTTP usage endpoint; it speaks JSON-RPC to `codex
@@ -89,14 +89,14 @@ exists post-merge; a few paragraphs still say things like "this project" the
 way the pre-merge repo would have, since most of this file (findings,
 gotchas, investigation) is kept verbatim from that repo rather than rewritten.
 
-- `~/dev/agent-statusline/quota/` — this directory, part of the
+- `~/dev/agent-statusline/adhoc_quotas_analysis/` — this directory, part of the
   `agent-statusline` git repo (full history from the standalone
   `agent-quota-tracker` repo preserved under this prefix). Source of truth
   for code. **Never edit the deployed copy directly.**
-- `~/opt/agent-statusline/quota/` — deployed pollers: `poll_claude.py`,
+- `~/opt/agent-statusline/adhoc_quotas_analysis/` — deployed pollers: `poll_claude.py`,
   `poll_codex.py`, `poll_all.py`, `recompute_token_events.py`,
   `recompute_codex_events.py`. `~/opt/agent-statusline/data/` (a sibling,
-  not nested under `quota/`) holds the actual logs — gitignored, lives only
+  not nested under `adhoc_quotas_analysis/`) holds the actual logs — gitignored, lives only
   here. Edit code in `~/dev/agent-statusline`, then re-run `./install.sh` to
   redeploy (see that repo's own `install.sh`, not a separate one here).
 - `~/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist` — symlink
@@ -114,7 +114,7 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   endpoint itself on a 60s cache TTL, and running that opportunistically
   across every open session independently caused 429s during busy
   multi-session hours; the statusline side now pushes its own free
-  `rate_limits` reading directly into `data/utilization-log.jsonl` instead
+  `rate_limits` reading directly into `data/quota-log.jsonl` instead
   of polling at all (`source: "claude_statusline"` rows — this poller's own
   `source: "claude"` rows are a fallback now, not the primary path).
 - `poll_codex.py` self-throttles in three tiers (the middle one added
@@ -135,7 +135,7 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   free local source - tier 2 is where the two pollers actually converge,
   both speeding up for the same "someone's watching" reason. One
   consequence worth knowing before you go looking for a bug:
-  `data/utilization-log.jsonl`'s `source: "codex"` rows will still show
+  `data/quota-log.jsonl`'s `source: "codex"` rows will still show
   gaps during exactly the periods of heaviest Codex use — that's by design
   (tier 1), not lost coverage; the trajectory for those periods lives in
   `data/codex-token-events.jsonl` instead (not yet merged into
@@ -148,13 +148,22 @@ Renamed three times as a standalone repo, then merged:
 2. → `claude-utilization-tracker` / `com.jeanlescut.claude-utilization-tracker` (2026-08-26)
 3. → `claude-utilization-cost-tracker` / `com.jeanlescut.claude-utilization-cost-tracker` (2026-08-26, later same day — folded in the $-cost-weighting hypothesis, which the plain "utilization-tracker" name didn't capture)
 4. → `agent-quota-tracker` / `com.jeanlescut.agent-quota-tracker` (2026-08-27 — dropped the Claude-specific name: this project is meant to track other coding agents' quotas too, starting with Codex. Naming got ahead of implementation at the time of this rename — the Codex poller itself landed 2026-08-30, see "What this project is" above)
-5. → merged into `agent-statusline` as `quota/`, 2026-08-31 (the two projects'
+5. → merged into `agent-statusline` as `adhoc_quotas_analysis/`, 2026-08-31 (the two projects'
    "Cross-project dependency" sections had grown into exactly the kind of
    coupling the machine's own `~/opt/<project>/` ownership convention warns
    against — see the root `AGENTS.md`'s "Quota tracking" section for the
    decision and its motivation). `com.jeanlescut.agent-quota-tracker`, the
    standalone LaunchAgent label, is retired; `com.jeanlescut.agent-statusline`
    now covers both the statusline render path and this poller.
+6. → directory renamed `quota/` → `adhoc_quotas_analysis/` within
+   `agent-statusline`, 2026-08-31 (same day, later — the merge folded in
+   everything, scheduled pollers included, under a name that only fit the
+   notebook/recompute half of it; also unified the log filename to
+   `data/quota-log.jsonl`, `UTIL_LOG_FILE` → `QUOTA_LOG_FILE`, and the
+   "usage"/"utilization"/"quota" wording in current-facing docs down to
+   one term, `quota` — this section's own historical entries above are
+   left as originally worded, since they're a factual record of past
+   names, not current terminology).
 
 `agent-statusline`'s own `install.sh` self-migrates from any prior layout
 automatically (`migrate_legacy()`-style helpers, one per prior name/repo) —
@@ -172,7 +181,7 @@ This is the single most important design decision in this repo — don't
   Code statusline is live, settling to roughly every 5 minutes once idle.
   When it does poll, it does exactly one thing: append the full raw
   `/api/oauth/usage` response + selected HTTP headers to
-  `data/utilization-log.jsonl`, tagged `source: "claude"`. This **must** be
+  `data/quota-log.jsonl`, tagged `source: "claude"`. This **must** be
   polled: the endpoint has no history, so a missed reading is permanently
   lost - the self-throttling only skips ticks it judges unnecessary, it
   never disables polling outright.
@@ -228,7 +237,7 @@ check `cleanupPeriodDays` is still 365 first — if it's been dropped back to
 
 Full JSON schema examples are in `README.md`. Quick summary:
 
-- `data/utilization-log.jsonl` — shared by three writers now, disambiguated by `source`. Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Codex poll rows (since 2026-08-30): `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../lib/statusline-push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
+- `data/quota-log.jsonl` — shared by three writers now, disambiguated by `source`. Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Codex poll rows (since 2026-08-30): `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../lib/statusline-push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
 - `data/token-events.jsonl` — one record per assistant message with usage, full fidelity (model, effort, session/cwd/sidechain identity, verbatim `usage` object including the `cache_creation` 5m/1h split and `output_tokens_details.thinking_tokens`). Deliberately excludes message content. Claude-only (see "Architecture" above).
 - `data/codex-token-events.jsonl` — Codex analogue, one record per local `token_count` event (roughly one per turn), full fidelity (session id/cwd, `total_token_usage`/`last_token_usage`, and the `rate_limits` snapshot logged alongside it). Built by `recompute_codex_events.py` from local session files only — no API call (see "Architecture" above).
 
@@ -314,7 +323,7 @@ must skip those.
 - **`_should_poll()`'s backoff check must scan back to the last row from
   THIS poller specifically, not just the last row in the file.**
   `poll_all.py` interleaves `source:"claude"` and `source:"codex"` rows in
-  the same `data/utilization-log.jsonl`. A helper that reads only the
+  the same `data/quota-log.jsonl`. A helper that reads only the
   literal last line (as `_last_log_row()` originally did) will happily read
   a Codex success row and conclude "no active backoff" seconds after
   Claude got a 429 with a live `Retry-After`. Caught 2026-08-30: a Codex
@@ -525,7 +534,7 @@ different, more resilient path. Both halves matter; don't read this as
 
 ### 1. Production log: the 429 rate, and how it escalated
 
-`data/utilization-log.jsonl`, 2026-08-24→08-30, ~1030 rows: **21% overall
+`data/quota-log.jsonl`, 2026-08-24→08-30, ~1030 rows: **21% overall
 429 rate** on `GET /api/oauth/usage`, but not flat — it climbed with no
 corresponding change in polling cadence:
 
@@ -891,7 +900,7 @@ it.
 ./install.sh
 
 # before any analysis session (data/token-events.jsonl is not kept incrementally):
-python3 ~/opt/agent-quota-tracker/recompute_token_events.py
+python3 ~/opt/agent-statusline/adhoc_quotas_analysis/recompute_token_events.py
 
 # then open analysis.ipynb and re-run all cells
 ```

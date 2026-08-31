@@ -27,9 +27,9 @@ import json
 import time
 from pathlib import Path
 
-# quota/ is deployed as a sibling of data/ under the shared agent-statusline
+# adhoc_quotas_analysis/ is deployed as a sibling of data/ under the shared agent-statusline
 # runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
-# parent, or this would look for a nonexistent quota/data/.
+# parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 EVENTS_LOG_FILE = DATA_DIR / "codex-token-events.jsonl"
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"

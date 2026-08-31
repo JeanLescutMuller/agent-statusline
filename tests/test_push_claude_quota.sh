@@ -2,15 +2,15 @@
 # End-to-end tests for lib/statusline-push-claude-quota.sh - the free path
 # that appends a claude_statusline row to the shared quota log from the
 # statusline's own stdin rate_limits, instead of waiting on
-# quota/poll_claude.py's network poll. See the script's own header comment
-# and quota/AGENTS.md's "GET /api/oauth/usage 429s" investigation for why.
+# adhoc_quotas_analysis/poll_claude.py's network poll. See the script's own header comment
+# and adhoc_quotas_analysis/AGENTS.md's "GET /api/oauth/usage 429s" investigation for why.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
 PUSH="$REPO_ROOT/lib/statusline-push-claude-quota.sh"
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-pushhome.XXXXXX")"
 trap 'rm -rf "$TH_HOME"' EXIT
-LOG="$TH_HOME/opt/agent-statusline/data/utilization-log.jsonl"
+LOG="$TH_HOME/opt/agent-statusline/data/quota-log.jsonl"
 TRANSCRIPT="$TH_HOME/transcript.jsonl"
 
 write_log() { mkdir -p "$(dirname "$LOG")"; printf '%s\n' "$1" > "$LOG"; }
@@ -93,7 +93,7 @@ EOF
 # Same transcript timestamp as the seed row - should still no-op despite the
 # two unrelated rows now sitting at the tail of the file (poll_claude.py hit
 # exactly this class of bug once: reading only the literal last line instead
-# of the last row from the same source - see quota/AGENTS.md).
+# of the last row from the same source - see adhoc_quotas_analysis/AGENTS.md).
 run_push "$TRANSCRIPT" 10 "" 20 ""
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_eq "still exactly 3 rows (seed + 2 unrelated), no duplicate push" "3" "$(row_count)"
