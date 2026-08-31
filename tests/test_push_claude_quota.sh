@@ -2,7 +2,7 @@
 # End-to-end tests for lib/statusline-push-claude-quota.sh - the free path
 # that appends a claude_statusline row to the shared quota log from the
 # statusline's own stdin rate_limits, instead of waiting on
-# adhoc_quotas_analysis/poll_claude.py's network poll. See the script's own header comment
+# src/quota_polling/poll_claude.py's network poll. See the script's own header comment
 # and adhoc_quotas_analysis/AGENTS.md's "GET /api/oauth/usage 429s" investigation for why.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"

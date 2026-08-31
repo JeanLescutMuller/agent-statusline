@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuilds data/token-events.jsonl from scratch by scanning every *.jsonl
+"""Rebuilds claude-token-events.jsonl from scratch by scanning every *.jsonl
 transcript under ~/.claude/projects/ - one record per individual assistant
 message with token usage, full fidelity (every field on the entry and on
 message.usage kept verbatim, not reduced to a few named counters: model,
@@ -24,11 +24,11 @@ import json
 import time
 from pathlib import Path
 
-# adhoc_quotas_analysis/ is deployed as a sibling of data/ under the shared agent-statusline
-# runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
-# parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-EVENTS_LOG_FILE = DATA_DIR / "token-events.jsonl"
+# Written beside this script itself, not under data/ - unlike the quota
+# logs, this output is fully recomputable at any time (see the module
+# docstring), so it lives with the recompute tooling rather than the
+# durable, unrecoverable-if-lost data/ tree.
+EVENTS_LOG_FILE = Path(__file__).resolve().parent / "claude-token-events.jsonl"
 TRANSCRIPTS_DIR = Path.home() / ".claude" / "projects"
 
 
@@ -80,8 +80,6 @@ def entry_to_event(entry: dict, path: Path) -> dict | None:
 
 
 def main() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
     n_events = 0
     n_files = 0
     tmp = EVENTS_LOG_FILE.with_suffix(".tmp")

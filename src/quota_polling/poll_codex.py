@@ -64,10 +64,11 @@ import subprocess
 import time
 from pathlib import Path
 
-# adhoc_quotas_analysis/ is deployed as a sibling of data/ under the shared agent-statusline
-# runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
-# parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# src/quota_polling/ is deployed two levels under the shared agent-statusline
+# runtime root (~/opt/agent-statusline/src/quota_polling/) - parent.parent.parent,
+# not parent.parent, or this would look for a nonexistent
+# src/data/ instead of the real sibling-of-src/ data/.
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 QUOTA_LOG_FILE = DATA_DIR / "codex-quota-history.jsonl"
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "heartbeat" / "codex"

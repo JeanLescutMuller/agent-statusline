@@ -49,7 +49,7 @@ payload_week_reset="${values[13]:-}"
 now="${values[14]:-0}"
 page=$((now / 4 % 3 + 1))
 
-# Liveness signal for adhoc_quotas_analysis/poll_codex.py's watched-vs-idle poll cadence:
+# Liveness signal for src/quota_polling/poll_codex.py's watched-vs-idle poll cadence:
 # faster (60s, matching the LaunchAgent's own tick) while this file is fresh
 # and no local session file is fresher still, backing off to the flat idle
 # cadence otherwise - same shape as heartbeat/claude, see

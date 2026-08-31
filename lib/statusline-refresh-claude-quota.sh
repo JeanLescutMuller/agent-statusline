@@ -7,7 +7,7 @@
 # live stdin `rate_limits` payload directly (see
 # lib/statusline-push-claude-quota.sh), falling back to this cached value
 # only for a session that hasn't sent its first message yet. Reads the
-# latest reading from adhoc_quotas_analysis/poll_claude.py's log
+# latest reading from src/quota_polling/poll_claude.py's log
 # (data/claude-quota-history.jsonl, shared with the push path above,
 # disambiguated by `source`) instead of hitting Anthropic's usage endpoint
 # directly - that poller is this account's single fixed-cadence,

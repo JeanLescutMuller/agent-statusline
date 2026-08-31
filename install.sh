@@ -3,8 +3,9 @@
 #
 # Deploys the shared cache/format library and the Claude/Codex provider
 # adapters, migrates any pre-existing bootstrap-home statusline runtime state,
-# deploys the quota-tracking pollers (folded in from the former
-# agent-quota-tracker repo - see adhoc_quotas_analysis/AGENTS.md) and their LaunchAgent, and -
+# deploys the quota-tracking research tooling (folded in from the former
+# agent-quota-tracker repo - see adhoc_quotas_analysis/AGENTS.md) and the
+# scheduled pollers under src/quota_polling/ plus their LaunchAgent, and -
 # when Codex is installed - builds/deploys the status-line-command patch and
 # wires ~/.codex/config.toml's [tui] status-line keys.
 #
@@ -87,6 +88,40 @@ if [ -d "$RUNTIME/quota" ]; then
     installed "removed orphaned $RUNTIME/quota (renamed to adhoc_quotas_analysis/)"
 fi
 
+# One-time: token-events.jsonl / codex-token-events.jsonl moved from data/
+# to adhoc_quotas_analysis/ (renamed with a claude-/codex- prefix - see
+# adhoc_quotas_analysis/AGENTS.md's "Naming history"). Fully recomputable
+# by hand at any time, but migrate any already-generated copy forward
+# rather than leaving it orphaned in data/.
+if [ -f "$RUNTIME/data/token-events.jsonl" ] && [ ! -f "$RUNTIME/adhoc_quotas_analysis/claude-token-events.jsonl" ]; then
+    mv "$RUNTIME/data/token-events.jsonl" "$RUNTIME/adhoc_quotas_analysis/claude-token-events.jsonl"
+    installed "renamed data/token-events.jsonl -> adhoc_quotas_analysis/claude-token-events.jsonl"
+fi
+if [ -f "$RUNTIME/data/codex-token-events.jsonl" ] && [ ! -f "$RUNTIME/adhoc_quotas_analysis/codex-token-events.jsonl" ]; then
+    mv "$RUNTIME/data/codex-token-events.jsonl" "$RUNTIME/adhoc_quotas_analysis/codex-token-events.jsonl"
+    installed "renamed data/codex-token-events.jsonl -> adhoc_quotas_analysis/codex-token-events.jsonl"
+fi
+
+step "quota polling"
+mkdir -p "$RUNTIME/src/quota_polling"
+for f in "$SCRIPT_DIR"/src/quota_polling/*.py; do
+    _deploy "$f" "$RUNTIME/src/quota_polling/$(basename "$f")"
+done
+
+# One-time: poll_claude.py/poll_codex.py/poll_all.py moved out of
+# adhoc_quotas_analysis/ into their own src/quota_polling/ tree (see
+# adhoc_quotas_analysis/AGENTS.md's "Naming history") - clean up the
+# orphaned old copies left behind by any prior install. Purely cosmetic
+# (the LaunchAgent plist below is rewritten from scratch every run and
+# already points at the new path), but nothing else will ever remove them
+# otherwise.
+for f in poll_claude.py poll_codex.py poll_all.py; do
+    if [ -f "$RUNTIME/adhoc_quotas_analysis/$f" ]; then
+        rm -f "$RUNTIME/adhoc_quotas_analysis/$f"
+        installed "removed orphaned $RUNTIME/adhoc_quotas_analysis/$f (moved to src/quota_polling/)"
+    fi
+done
+
 # One-time: fold in agent-quota-tracker's live deployment. Its own
 # install.sh had this exact migrate_legacy() idiom for its four prior
 # renames; this applies the same pattern once more, across repos instead of
@@ -152,7 +187,7 @@ cat > "$QUOTA_PLIST_TMP" <<PLIST
     <key>ProgramArguments</key>
     <array>
         <string>$PYTHON3</string>
-        <string>$RUNTIME/adhoc_quotas_analysis/poll_all.py</string>
+        <string>$RUNTIME/src/quota_polling/poll_all.py</string>
     </array>
 
     <!-- Tick every 60s - NOT the same as polling every 60s. Both pollers

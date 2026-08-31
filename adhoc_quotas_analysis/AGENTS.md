@@ -10,8 +10,9 @@ so a fresh session doesn't have to re-derive any of it.
 ## What this project is
 
 **As of 2026-08-30 this project tracks Claude Code and Codex.** Two
-pollers, each writing to its own per-provider file since the 2026-08-31
-split (see "Naming history" below): `poll_claude.py` (renamed from
+pollers - living at `../src/quota_polling/` from this directory since a
+second 2026-08-31 split (see "Naming history" below) - each writing to
+its own per-provider file: `poll_claude.py` (renamed from
 `poll.py` — hits Anthropic's `GET /api/oauth/usage`, see below) appends to
 `data/claude-quota-history.jsonl` (shared with the statusline push path,
 disambiguated there by a `source` field); `poll_codex.py` (new — Codex has
@@ -95,13 +96,21 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
 - `~/dev/agent-statusline/adhoc_quotas_analysis/` — this directory, part of the
   `agent-statusline` git repo (full history from the standalone
   `agent-quota-tracker` repo preserved under this prefix). Source of truth
-  for code. **Never edit the deployed copy directly.**
-- `~/opt/agent-statusline/adhoc_quotas_analysis/` — deployed pollers: `poll_claude.py`,
-  `poll_codex.py`, `poll_all.py`, `recompute_token_events.py`,
-  `recompute_codex_events.py`. `~/opt/agent-statusline/data/` (a sibling,
-  not nested under `adhoc_quotas_analysis/`) holds the actual logs — gitignored, lives only
-  here. Edit code in `~/dev/agent-statusline`, then re-run `./install.sh` to
-  redeploy (see that repo's own `install.sh`, not a separate one here).
+  for the not-scheduled, run-by-hand research tooling. **Never edit the
+  deployed copy directly.**
+- `~/dev/agent-statusline/src/quota_polling/` — sibling source tree for the
+  LaunchAgent-scheduled pollers, split out of this directory 2026-08-31
+  (see "Naming history" below).
+- `~/opt/agent-statusline/adhoc_quotas_analysis/` — deployed
+  `split_quota_log.py`, `recompute_token_events.py`,
+  `recompute_codex_events.py`, plus the two token-event output files
+  (`claude-token-events.jsonl`, `codex-token-events.jsonl`, written here
+  directly, not under `data/` — see "Data files" below).
+  `~/opt/agent-statusline/src/quota_polling/` — deployed `poll_claude.py`,
+  `poll_codex.py`, `poll_all.py`. `~/opt/agent-statusline/data/` (a sibling
+  of both) holds the two quota logs — gitignored, lives only here. Edit
+  code in `~/dev/agent-statusline`, then re-run `./install.sh` to redeploy
+  (see that repo's own `install.sh`, not a separate one here).
 - `~/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist` — symlink
   only, points into `~/opt/agent-statusline/`. Never a real file there.
 - LaunchAgent ticks `poll_all.py` every 60s (`StartInterval=60`, changed from
@@ -142,8 +151,9 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   `source: "codex"`, so the file simply goes quiet) during exactly the
   periods of heaviest Codex use — that's by design
   (tier 1), not lost coverage; the trajectory for those periods lives in
-  `data/codex-token-events.jsonl` instead (not yet merged into
-  `analysis.ipynb` — see Natural next steps).
+  `codex-token-events.jsonl` instead (this directory, not `data/` — see
+  "Data files" below; not yet merged into `analysis.ipynb` — see Natural
+  next steps).
 
 ## Naming history (in case anything still references an old name)
 
@@ -182,6 +192,27 @@ Renamed three times as a standalone repo, then merged:
    is unchanged in both pollers — only the path it points at differs per
    file — so don't be misled by the identical variable name into thinking
    they still share a file.
+8. → moved `poll_claude.py`/`poll_codex.py`/`poll_all.py` out of this
+   directory into their own `src/quota_polling/` tree at the
+   `agent-statusline` repo root, and moved the token-event output files
+   out of `data/` into this directory with a `claude-`/`codex-` prefix
+   (`data/token-events.jsonl` → `claude-token-events.jsonl`,
+   `data/codex-token-events.jsonl` → `codex-token-events.jsonl`) —
+   2026-08-31 (same day, later still — dev-repo prep only at time of
+   writing, not yet run against the live `~/opt/agent-statusline/`
+   runtime). Rationale: once deployed, LaunchAgent-scheduled, unattended
+   pollers are a genuinely different kind of thing from the not-scheduled,
+   run-by-hand research tooling that stays in `adhoc_quotas_analysis/` -
+   this makes that split real in the file layout, not just in prose (see
+   the root `AGENTS.md`'s "Repo layout", now "Four independent mandates").
+   Both `poll_claude.py` and `poll_codex.py`'s `DATA_DIR` constant gained
+   an extra `.parent` (now `parent.parent.parent`, not `parent.parent`) to
+   account for the added nesting level - `data/` is still a sibling of
+   `src/`, not `adhoc_quotas_analysis/`, in the deployed runtime.
+   `install.sh` migrates both moves forward: removes any pollers still
+   deployed at the pre-split `adhoc_quotas_analysis/poll_*.py` location,
+   and renames any legacy `data/token-events.jsonl` /
+   `data/codex-token-events.jsonl` into this directory.
 
 `agent-statusline`'s own `install.sh` self-migrates from any prior layout
 automatically (`migrate_legacy()`-style helpers, one per prior name/repo) —
@@ -192,6 +223,10 @@ folder. Idempotent, safe to re-run any time.
 
 This is the single most important design decision in this repo — don't
 "simplify" it back to one incremental logger without re-reading this.
+
+All three of `poll_claude.py`, `poll_codex.py`, and `poll_all.py` now live
+at `../src/quota_polling/` from this directory (split out 2026-08-31 - see
+"Naming history"); everything else below still lives here.
 
 - **`poll_claude.py`** — runs on the LaunchAgent tick (via `poll_all.py`,
   see below), but self-throttles most ticks away (see its module docstring):
@@ -223,15 +258,16 @@ This is the single most important design decision in this repo — don't
   other. Each poller stays fully runnable standalone by hand.
 - **`recompute_token_events.py`** — **not** scheduled, run by hand (or at
   the top of `analysis.ipynb`'s workflow). Fully rebuilds
-  `data/token-events.jsonl` from scratch every time, by scanning every
-  `*.jsonl` under `~/.claude/projects/`. Stateless — no byte offsets, no
-  incremental state, just overwrite-on-demand via a `.tmp` + atomic
-  `.replace()`.
+  `claude-token-events.jsonl` (in this same directory, not `data/` - see
+  "Naming history" and "Data files" below) from scratch every time, by
+  scanning every `*.jsonl` under `~/.claude/projects/`. Stateless — no byte
+  offsets, no incremental state, just overwrite-on-demand via a `.tmp` +
+  atomic `.replace()`.
 - **`recompute_codex_events.py`** — the Codex analogue, same rationale
   and same stateless-rebuild shape. Scans every `*.jsonl` under
   `~/.codex/sessions/` for `event_msg` entries of `type: "token_count"`
-  and writes one record per event to `data/codex-token-events.jsonl`.
-  Pure local-file parsing, **no RPC / Codex API call** — those events
+  and writes one record per event to `codex-token-events.jsonl` (also in
+  this directory). Pure local-file parsing, **no RPC / Codex API call** — those events
   already carry both the token-usage breakdown and a `rate_limits`
   snapshot (see the correction note in "What this project is" above for
   why an earlier version of this file wrongly said this data didn't
@@ -259,8 +295,8 @@ Full JSON schema examples are in `README.md`. Quick summary:
 
 - `data/claude-quota-history.jsonl` — shared by two writers, disambiguated by `source` (split from a combined `data/quota-log.jsonl` on 2026-08-31 - see "Naming history"). Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../lib/statusline-push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
 - `data/codex-quota-history.jsonl` — one writer, `poll_codex.py`; every row is `source: "codex"` (since 2026-08-30, the date the Codex poller landed - this file has no rows older than that). Codex poll rows: `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`.
-- `data/token-events.jsonl` — one record per assistant message with usage, full fidelity (model, effort, session/cwd/sidechain identity, verbatim `usage` object including the `cache_creation` 5m/1h split and `output_tokens_details.thinking_tokens`). Deliberately excludes message content. Claude-only (see "Architecture" above).
-- `data/codex-token-events.jsonl` — Codex analogue, one record per local `token_count` event (roughly one per turn), full fidelity (session id/cwd, `total_token_usage`/`last_token_usage`, and the `rate_limits` snapshot logged alongside it). Built by `recompute_codex_events.py` from local session files only — no API call (see "Architecture" above).
+- `claude-token-events.jsonl` — lives in this directory directly, not `data/` (moved 2026-08-31 - see "Naming history": fully recomputable, so it doesn't need the durable-log treatment `data/` is for). One record per assistant message with usage, full fidelity (model, effort, session/cwd/sidechain identity, verbatim `usage` object including the `cache_creation` 5m/1h split and `output_tokens_details.thinking_tokens`). Deliberately excludes message content. Claude-only (see "Architecture" above).
+- `codex-token-events.jsonl` — also in this directory, not `data/`. Codex analogue, one record per local `token_count` event (roughly one per turn), full fidelity (session id/cwd, `total_token_usage`/`last_token_usage`, and the `rate_limits` snapshot logged alongside it). Built by `recompute_codex_events.py` from local session files only — no API call (see "Architecture" above).
 
 As of 2026-08-27: 440 utilization poll rows (390 with a usable payload —
 ~11% were failed fetches, now with a recorded reason — see the `error`
@@ -925,7 +961,7 @@ it.
 # after code changes, or on a fresh machine:
 ./install.sh
 
-# before any analysis session (data/token-events.jsonl is not kept incrementally):
+# before any analysis session (claude-token-events.jsonl is not kept incrementally):
 python3 ~/opt/agent-statusline/adhoc_quotas_analysis/recompute_token_events.py
 
 # then open analysis.ipynb and re-run all cells

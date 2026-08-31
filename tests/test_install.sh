@@ -45,15 +45,17 @@ diff -q "$REPO_ROOT/lib/statusline-cache.sh" "$th_home/opt/agent-statusline/lib/
 assert_status "deployed lib matches the repo source" 0 $?
 
 section "deploys the quota pollers and their LaunchAgent"
-assert_file_exists "poll_claude.py deployed under ~/opt/agent-statusline/adhoc_quotas_analysis" \
-    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
-assert_file_exists "poll_codex.py deployed" "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_codex.py"
-assert_file_exists "poll_all.py deployed" "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_all.py"
+assert_file_exists "poll_claude.py deployed under ~/opt/agent-statusline/src/quota_polling" \
+    "$th_home/opt/agent-statusline/src/quota_polling/poll_claude.py"
+assert_file_exists "poll_codex.py deployed" "$th_home/opt/agent-statusline/src/quota_polling/poll_codex.py"
+assert_file_exists "poll_all.py deployed" "$th_home/opt/agent-statusline/src/quota_polling/poll_all.py"
+assert_file_exists "split_quota_log.py deployed under adhoc_quotas_analysis" \
+    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/split_quota_log.py"
 assert_file_exists "data/ created for the shared log" "$th_home/opt/agent-statusline/data"
 assert_file_exists "LaunchAgent plist written" \
     "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist"
-assert_contains "plist points at adhoc_quotas_analysis/poll_all.py" \
-    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist")" "adhoc_quotas_analysis/poll_all.py"
+assert_contains "plist points at src/quota_polling/poll_all.py" \
+    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist")" "src/quota_polling/poll_all.py"
 assert_eq "plist is symlinked into ~/Library/LaunchAgents, not copied" \
     "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist" \
     "$(readlink "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist")"
@@ -109,12 +111,64 @@ run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_contains "reports the cleanup" "$TH_OUT" "removed orphaned"
 assert_file_missing "the orphaned dir is gone" "$th_home/opt/agent-statusline/quota"
-assert_file_exists "the new dir is deployed instead" \
-    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
+assert_file_exists "the current location is deployed instead" \
+    "$th_home/opt/agent-statusline/src/quota_polling/poll_claude.py"
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_not_contains "no cleanup message on a second run - old dir is already gone" \
     "$TH_OUT" "removed orphaned"
+rm -rf "$th_home"
+
+section "moves poll_claude.py/poll_codex.py/poll_all.py out of adhoc_quotas_analysis/ into src/quota_polling/"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/opt/agent-statusline/adhoc_quotas_analysis"
+for f in poll_claude.py poll_codex.py poll_all.py; do
+    printf 'stale\n' > "$th_home/opt/agent-statusline/adhoc_quotas_analysis/$f"
+done
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "reports the poll_claude.py cleanup" "$TH_OUT" \
+    "removed orphaned $th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
+assert_contains "reports the poll_codex.py cleanup" "$TH_OUT" \
+    "removed orphaned $th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_codex.py"
+assert_contains "reports the poll_all.py cleanup" "$TH_OUT" \
+    "removed orphaned $th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_all.py"
+assert_file_missing "poll_claude.py is gone from the old location" \
+    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
+assert_file_missing "poll_codex.py is gone from the old location" \
+    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_codex.py"
+assert_file_missing "poll_all.py is gone from the old location" \
+    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_all.py"
+diff -q "$REPO_ROOT/src/quota_polling/poll_claude.py" \
+    "$th_home/opt/agent-statusline/src/quota_polling/poll_claude.py" >/dev/null
+assert_status "the current location got the real deployed content, not the stale stub" 0 $?
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_not_contains "no cleanup message on a second run - old copies are already gone" \
+    "$TH_OUT" "removed orphaned"
+rm -rf "$th_home"
+
+section "renames data/token-events.jsonl + data/codex-token-events.jsonl into adhoc_quotas_analysis/"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/opt/agent-statusline/data"
+printf '{"ts":1,"model":"claude-sonnet-5"}\n' > "$th_home/opt/agent-statusline/data/token-events.jsonl"
+printf '{"ts":2,"session_id":"abc"}\n' > "$th_home/opt/agent-statusline/data/codex-token-events.jsonl"
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "reports the claude rename" "$TH_OUT" \
+    "renamed data/token-events.jsonl -> adhoc_quotas_analysis/claude-token-events.jsonl"
+assert_contains "reports the codex rename" "$TH_OUT" \
+    "renamed data/codex-token-events.jsonl -> adhoc_quotas_analysis/codex-token-events.jsonl"
+assert_file_missing "old claude filename is gone" "$th_home/opt/agent-statusline/data/token-events.jsonl"
+assert_file_missing "old codex filename is gone" "$th_home/opt/agent-statusline/data/codex-token-events.jsonl"
+assert_contains "claude content is preserved, not regenerated" \
+    "$(cat "$th_home/opt/agent-statusline/adhoc_quotas_analysis/claude-token-events.jsonl")" '"ts":1'
+assert_contains "codex content is preserved, not regenerated" \
+    "$(cat "$th_home/opt/agent-statusline/adhoc_quotas_analysis/codex-token-events.jsonl")" '"ts":2'
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_not_contains "no rename message on a second run - already migrated" \
+    "$TH_OUT" "renamed data/token-events.jsonl"
 rm -rf "$th_home"
 
 section "renames a pre-existing data/utilization-log.jsonl to quota-log.jsonl, then splits it by provider"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuilds data/codex-token-events.jsonl from scratch by scanning every
+"""Rebuilds codex-token-events.jsonl from scratch by scanning every
 *.jsonl rollout under ~/.codex/sessions/ - the Codex analogue of
 recompute_token_events.py.
 
@@ -27,11 +27,11 @@ import json
 import time
 from pathlib import Path
 
-# adhoc_quotas_analysis/ is deployed as a sibling of data/ under the shared agent-statusline
-# runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
-# parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-EVENTS_LOG_FILE = DATA_DIR / "codex-token-events.jsonl"
+# Written beside this script itself, not under data/ - unlike the quota
+# logs, this output is fully recomputable at any time (see the module
+# docstring), so it lives with the recompute tooling rather than the
+# durable, unrecoverable-if-lost data/ tree.
+EVENTS_LOG_FILE = Path(__file__).resolve().parent / "codex-token-events.jsonl"
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 
 
@@ -106,8 +106,6 @@ def scan_file(path: Path):
 
 
 def main() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
     n_events = 0
     n_files = 0
     tmp = EVENTS_LOG_FILE.with_suffix(".tmp")

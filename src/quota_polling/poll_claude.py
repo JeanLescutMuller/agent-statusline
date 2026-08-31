@@ -9,13 +9,13 @@ expired" and "the wifi dropped" need very different responses.
 
 Token usage is deliberately NOT logged here. It's fully recomputable at
 analysis time from the transcripts Claude Code itself already writes under
-~/.claude/projects/ (see recompute_token_events.py) - logging it here too
+~/.claude/projects/ (see ../../adhoc_quotas_analysis/recompute_token_events.py) - logging it here too
 would just be storing a copy of data that already durably exists elsewhere
 on disk (cleanupPeriodDays=365 on this machine, so "durably" means about a
 year). Only log what can't be recomputed after the fact.
 
 The LaunchAgent ticks this every 60s (see install.sh), but every tick isn't
-necessarily a real poll: ../providers/claude-statusline-command.sh (this
+necessarily a real poll: ../../providers/claude-statusline-command.sh (this
 repo's Claude statusline adapter - see the root AGENTS.md's "Quota tracking"
 section) touches a heartbeat file on every statusline render, so a heartbeat
 younger than ACTIVE_WINDOW_SECONDS means a statusline is being drawn
@@ -31,7 +31,7 @@ not installed, or never rendered) just means is_active() is always False,
 which degrades gracefully to the old flat 5-minute cadence.
 
 Note this poller's own `source: "claude"` rows are a fallback path now, not
-the primary one: ../lib/statusline-push-claude-quota.sh pushes a free
+the primary one: ../../lib/statusline-push-claude-quota.sh pushes a free
 `source: "claude_statusline"` reading on every real message, riding
 Claude Code's own in-memory rate_limits state - no network call, never
 rate-limited. This poller still matters for the gap that push path can't
@@ -47,10 +47,11 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-# adhoc_quotas_analysis/ is deployed as a sibling of data/ under the shared agent-statusline
-# runtime root (~/opt/agent-statusline/{quota,data}/) - parent.parent, not
-# parent, or this would look for a nonexistent adhoc_quotas_analysis/data/.
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# src/quota_polling/ is deployed two levels under the shared agent-statusline
+# runtime root (~/opt/agent-statusline/src/quota_polling/) - parent.parent.parent,
+# not parent.parent, or this would look for a nonexistent
+# src/data/ instead of the real sibling-of-src/ data/.
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 QUOTA_LOG_FILE = DATA_DIR / "claude-quota-history.jsonl"
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
@@ -196,7 +197,7 @@ def _last_log_row() -> dict | None:
 
 def _last_claude_log_row() -> dict | None:
     """The last logged row from THIS poller specifically, not from
-    ../lib/statusline-push-claude-quota.sh's frequent claude_statusline
+    ../../lib/statusline-push-claude-quota.sh's frequent claude_statusline
     pushes into the same claude-quota-history.jsonl file - scanning back
     past intervening push rows is required here, reading the literal last
     line missed a real Retry-After backoff for a full tick once already

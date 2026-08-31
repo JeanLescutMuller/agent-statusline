@@ -10,20 +10,24 @@ file only covers things relevant to *working on* the project.
 
 ## Repo layout
 
-Three independent mandates, kept in separate trees — see README.md's
+Four independent mandates, kept in separate trees — see README.md's
 "Architecture" section for the call-graph diagram.
 
 ```
 agent-statusline/
-├── install.sh                    # deploy: shared lib, adapters, adhoc_quotas_analysis/ + its LaunchAgent; drives codex-patch/ conditionally
+├── install.sh                    # deploy: shared lib, adapters, src/quota_polling/ + adhoc_quotas_analysis/ + their LaunchAgent; drives codex-patch/ conditionally
 ├── utils.sh                      # shared echo/color helpers for install.sh and the patch script
 ├── lib/                          # statusline architecture: shared cache/format lib + refresh scripts
-│   ├── statusline-refresh-claude-quota.sh   # fallback: reads the shared quota log
-│   └── statusline-push-claude-quota.sh      # primary: pushes live rate_limits to the shared quota log
+│   ├── statusline-refresh-claude-quota.sh   # fallback: reads the claude quota log
+│   └── statusline-push-claude-quota.sh      # primary: pushes live rate_limits to the claude quota log
 ├── providers/                    # statusline architecture: Claude/Codex payload adapters, call into lib/
-├── adhoc_quotas_analysis/        # quota tracking: folded in from the former agent-quota-tracker repo,
+├── src/
+│   └── quota_polling/            # quota polling: LaunchAgent-scheduled, deployed, unattended production code
+│       ├── poll_claude.py / poll_codex.py       # per-provider pollers
+│       └── poll_all.py                          # the actual LaunchAgent entry point, runs both as subprocesses
+├── adhoc_quotas_analysis/        # quota research: folded in from the former agent-quota-tracker repo,
 │                                 # full git history preserved under this prefix (see its own AGENTS.md)
-│   ├── poll_claude.py / poll_codex.py / poll_all.py   # LaunchAgent-scheduled pollers
+│   ├── split_quota_log.py        # one-time, idempotent log-split migration, run automatically by install.sh
 │   ├── recompute_token_events.py / recompute_codex_events.py   # not scheduled, run by hand
 │   ├── analysis.ipynb            # research notebook
 │   └── AGENTS.md                 # deep-dive: investigation, findings, gotchas - not force-merged into this file
@@ -68,31 +72,38 @@ file that reaches into both trees.
 color (falls back to a default if absent — not a hard dependency). That
 script is owned by `bootstrap-home`, not this repo.
 
-## Quota tracking (`adhoc_quotas_analysis/`)
+## Quota tracking (`src/quota_polling/` + `adhoc_quotas_analysis/`)
 
 Folded in from the former `agent-quota-tracker` repo (merged 2026-08-31,
 full git history preserved under the `adhoc_quotas_analysis/` prefix — the old repo's
 "Cross-project dependency" section, describing this exact coupling as a
-cross-repo one, is now obsolete; this section replaces it). Read
-`adhoc_quotas_analysis/AGENTS.md` for the actual investigation, findings, and gotchas — it's
-kept as its own file rather than merged into this one, the same way
-`codex-patch/`'s own conventions live in this file rather than README.md.
+cross-repo one, is now obsolete; this section replaces it). The
+LaunchAgent-scheduled pollers (`poll_claude.py`, `poll_codex.py`,
+`poll_all.py`) were split out into their own `src/quota_polling/` tree the
+same day, once deployed and running unattended made them a genuinely
+different kind of thing from the not-scheduled, run-by-hand research
+material (`recompute_*.py`, `analysis.ipynb`) that stayed behind in
+`adhoc_quotas_analysis/` — see that directory's own `AGENTS.md` for the
+actual investigation, findings, and gotchas (kept as its own file rather
+than merged into this one, the same way `codex-patch/`'s own conventions
+live in this file rather than README.md).
 
-The coupling between `adhoc_quotas_analysis/` and `lib/`/`providers/` is file-based, not a
-`source`/import — see README.md's "Architecture" section for exactly which
-scripts read/write `data/claude-quota-history.jsonl` and
-`data/codex-quota-history.jsonl` (split from a single combined
-`data/quota-log.jsonl` on 2026-08-31 — see `adhoc_quotas_analysis/AGENTS.md`'s
-"Naming history"). One thing worth stating
-plainly here since it's easy to get backwards: `lib/statusline-push-claude-quota.sh`
-is the *primary* Claude quota path now (free, rides existing traffic, never
-rate-limited); `lib/statusline-refresh-claude-quota.sh` + `adhoc_quotas_analysis/poll_claude.py`
+The coupling between `src/quota_polling/`/`adhoc_quotas_analysis/` and
+`lib/`/`providers/` is file-based, not a `source`/import — see README.md's
+"Architecture" section for exactly which scripts read/write
+`data/claude-quota-history.jsonl` and `data/codex-quota-history.jsonl`
+(split from a single combined `data/quota-log.jsonl` on 2026-08-31 — see
+`adhoc_quotas_analysis/AGENTS.md`'s "Naming history"). One thing worth
+stating plainly here since it's easy to get backwards:
+`lib/statusline-push-claude-quota.sh` is the *primary* Claude quota path
+now (free, rides existing traffic, never rate-limited);
+`lib/statusline-refresh-claude-quota.sh` + `src/quota_polling/poll_claude.py`
 are a *fallback* for the one gap the push path can't cover — a session that
 hasn't sent its first message yet, or a machine-wide idle stretch with no
 statusline rendering anywhere at all.
 
 `providers/claude-statusline-command.sh` touches `state/heartbeat/claude`
-on every render specifically so `adhoc_quotas_analysis/poll_claude.py` can tell a statusline
+on every render specifically so `src/quota_polling/poll_claude.py` can tell a statusline
 is live and poll faster (see `adhoc_quotas_analysis/AGENTS.md`'s "Architecture" section) —
 this is the one piece of the old cross-repo coupling that's still real,
 just intra-repo now instead of cross-repo.
@@ -100,11 +111,12 @@ just intra-repo now instead of cross-repo.
 ## Tests
 
 `bash tests/run.sh` before committing a change to `lib/`, `providers/`,
-`adhoc_quotas_analysis/`, `install.sh`, or `codex-patch/install-codex-statusline-patch.sh`.
+`src/quota_polling/`, `adhoc_quotas_analysis/`, `install.sh`, or
+`codex-patch/install-codex-statusline-patch.sh`.
 See `tests/README.md` for what the suite covers and what it deliberately
 doesn't (the real Codex `git clone` + `cargo build` path; live
 Anthropic/Keychain calls — the Keychain read lives entirely in
-`adhoc_quotas_analysis/poll_claude.py`). It's hermetic — temp git repos, a temp `$HOME`, a
+`src/quota_polling/poll_claude.py`). It's hermetic — temp git repos, a temp `$HOME`, a
 fixture quota log, `AGENT_STATUSLINE_SKIP_LAUNCHD=1` to keep `install.sh`'s
 LaunchAgent step off the real `gui/$(id -u)` launchd domain — never touches
 this machine's real `~/.claude`, `~/.codex`, or account state.

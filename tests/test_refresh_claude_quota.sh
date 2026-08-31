@@ -3,7 +3,7 @@
 # statusline-usage-fetch.sh this replaced, there's no Keychain or network to
 # stub - the script just reads the latest "claude" row out of a fixture
 # quota log, so these tests write that fixture directly. See the script's
-# own header comment for why adhoc_quotas_analysis/poll_claude.py's log is the source now
+# own header comment for why src/quota_polling/poll_claude.py's log is the source now
 # instead of a live API call.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"

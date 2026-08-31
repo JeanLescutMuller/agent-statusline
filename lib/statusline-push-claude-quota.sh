@@ -1,6 +1,6 @@
 #!/bin/bash
 # Appends a Claude quota reading to data/claude-quota-history.jsonl
-# (shared with adhoc_quotas_analysis/poll_claude.py, disambiguated by
+# (shared with src/quota_polling/poll_claude.py, disambiguated by
 # `source`) whenever the statusline's stdin payload carries a genuinely
 # newer observation than the last one this same push path logged. Free:
 # rides `rate_limits`, already present on every render's stdin payload, no
@@ -44,7 +44,7 @@ observed_at="$(tail -n 20 "$transcript_path" 2>/dev/null | jq -n -r '
 mkdir -p "$(dirname "$log_file")"
 
 # Compare against this push path's OWN last row specifically - this file
-# also carries adhoc_quotas_analysis/poll_claude.py's `claude` poll rows,
+# also carries src/quota_polling/poll_claude.py's `claude` poll rows,
 # and reading just the tail line can silently compare against the wrong
 # source. poll_claude.py hit exactly this bug once (see
 # adhoc_quotas_analysis/AGENTS.md's `_last_claude_log_row` gotcha) - same
