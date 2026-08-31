@@ -15,7 +15,12 @@ CODEX_FREE_PATH="/opt/anaconda3/bin:/usr/bin:/bin:/opt/homebrew/bin:/usr/sbin:/s
 run_install() {
     local home="$1" err_file
     err_file="$(mktemp "${TMPDIR:-/tmp}/th-err.XXXXXX")"
-    TH_OUT="$(HOME="$home" PATH="$CODEX_FREE_PATH" bash "$INSTALL" 2>"$err_file")"
+    # AGENT_STATUSLINE_SKIP_LAUNCHD: gui/$(id -u) is a real per-user launchd
+    # domain a HOME override can't sandbox - without this, every test run
+    # would bootstrap a real LaunchAgent pointing at a temp dir that's
+    # deleted when the test ends.
+    TH_OUT="$(HOME="$home" PATH="$CODEX_FREE_PATH" AGENT_STATUSLINE_SKIP_LAUNCHD=1 \
+        bash "$INSTALL" 2>"$err_file")"
     TH_STATUS=$?
     TH_ERR="$(cat "$err_file")"
     rm -f "$err_file"
@@ -39,6 +44,20 @@ assert_file_exists "Claude adapter deployed" "$th_home/.claude/statusline-comman
 diff -q "$REPO_ROOT/lib/statusline-cache.sh" "$th_home/opt/agent-statusline/lib/statusline-cache.sh" >/dev/null
 assert_status "deployed lib matches the repo source" 0 $?
 
+section "deploys the quota pollers and their LaunchAgent"
+assert_file_exists "poll_claude.py deployed under ~/opt/agent-statusline/quota" \
+    "$th_home/opt/agent-statusline/quota/poll_claude.py"
+assert_file_exists "poll_codex.py deployed" "$th_home/opt/agent-statusline/quota/poll_codex.py"
+assert_file_exists "poll_all.py deployed" "$th_home/opt/agent-statusline/quota/poll_all.py"
+assert_file_exists "data/ created for the shared log" "$th_home/opt/agent-statusline/data"
+assert_file_exists "LaunchAgent plist written" \
+    "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist"
+assert_contains "plist points at quota/poll_all.py" \
+    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist")" "quota/poll_all.py"
+assert_eq "plist is symlinked into ~/Library/LaunchAgents, not copied" \
+    "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist" \
+    "$(readlink "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist")"
+
 section "idempotent re-run: second run reports 'ok', not '[+]', for unchanged files"
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
@@ -58,6 +77,28 @@ assert_file_exists "state moved to the new runtime dir" "$th_home/opt/agent-stat
 assert_eq "migrated content is preserved, not regenerated" "legacy-host" "$(cat "$th_home/opt/agent-statusline/state/static/hostname")"
 assert_file_exists "logs moved to the new runtime dir" "$th_home/opt/agent-statusline/logs/statusline.log"
 assert_file_missing "the legacy runtime dir is gone" "$legacy"
+rm -rf "$th_home"
+
+section "migrates agent-quota-tracker's live deployment"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+old_folder="$th_home/opt/agent-quota-tracker"
+mkdir -p "$old_folder/data" "$th_home/Library/LaunchAgents"
+printf '{"ts":1,"source":"claude","api":{}}\n' > "$old_folder/data/utilization-log.jsonl"
+printf 'fake plist\n' > "$th_home/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist"
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "reports the migration" "$TH_OUT" "migrated from ~/opt/agent-quota-tracker"
+assert_file_missing "the old deployed folder is gone" "$old_folder"
+assert_file_missing "the old LaunchAgent symlink is removed" \
+    "$th_home/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist"
+assert_file_exists "its data/ is carried forward" \
+    "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
+assert_contains "carried-forward content is preserved, not regenerated" \
+    "$(cat "$th_home/opt/agent-statusline/data/utilization-log.jsonl")" '"ts":1'
+run_install "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_not_contains "no migration message on a second run - old folder is already gone" \
+    "$TH_OUT" "migrated from ~/opt/agent-quota-tracker"
 rm -rf "$th_home"
 
 section "orphaned pre-2026-08-30 usage-fetch helper is removed"

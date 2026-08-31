@@ -31,7 +31,9 @@ done < <(jq -j '
         ((.rate_limits.five_hour.used_percentage // 0) | round | tostring),
         (.rate_limits.five_hour.resets_at | text("")),
         ((.rate_limits.seven_day.used_percentage // 0) | round | tostring),
-        (.rate_limits.seven_day.resets_at | text(""))
+        (.rate_limits.seven_day.resets_at | text("")),
+        (.transcript_path | text("")),
+        ((.rate_limits.five_hour != null or .rate_limits.seven_day != null) | tostring)
     ] | .[] | ., "\u0000"
 ')
 
@@ -44,6 +46,19 @@ five_pct="${values[5]:-0}"
 five_reset="${values[6]:-}"
 week_pct="${values[7]:-0}"
 week_reset="${values[8]:-}"
+transcript_path="${values[9]:-}"
+has_rate_limits="${values[10]:-false}"
+
+# Push the fresh reading to the shared quota log first, before any cache
+# overlay below - this must see the raw stdin values, the highest-resolution
+# signal there is (see lib/statusline-push-claude-quota.sh). Skipped when
+# stdin has no rate_limits at all (session hasn't sent a message yet) rather
+# than pushing a misleading 0%.
+if [ "$has_rate_limits" = "true" ]; then
+    bash "$lib_dir/statusline-push-claude-quota.sh" \
+        "$transcript_path" "$five_pct" "$five_reset" "$week_pct" "$week_reset" \
+        >/dev/null 2>&1 || true
+fi
 
 model_display="$model"
 [ -n "$effort" ] && model_display="$model ($effort)"
@@ -55,7 +70,11 @@ if [ ! -f "$quota_cache" ]; then
     statusline_write_values_if_stale "$quota_cache" 60 claude-quota 8 "$now" \
         "$five_pct" "$five_reset" "$week_pct" "$week_reset"
 fi
-if [ -f "$quota_cache" ]; then
+# Live stdin values win whenever this render actually has rate_limits -
+# they're the freshest signal there is (see the push call above and
+# quota/AGENTS.md §6). The cache overlay is a fallback for the one case
+# stdin can't cover: a session that hasn't sent its first message yet.
+if [ "$has_rate_limits" != "true" ] && [ -f "$quota_cache" ]; then
     IFS="$STATUSLINE_FIELD_SEPARATOR" read -r cached_five_pct cached_five_reset \
         cached_week_pct cached_week_reset < "$quota_cache"
     [ -n "$cached_five_pct" ] && five_pct="$cached_five_pct"
