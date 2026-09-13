@@ -62,9 +62,14 @@ assert_not_contains "does not strip the signed official code-mode host" "$script
 assert_contains "smoke-tests codex-code-mode-host before marking success" "$script_text" \
     '"$destination/bin/codex-code-mode-host" --help'
 assert_contains "builds in a scratch dir under TMPDIR, never under the persistent runtime dir" \
-    "$script_text" '${TMPDIR:-/tmp}/agent-statusline-codex-patch'
-assert_contains "cleans up its scratch dir on exit, success or failure" "$script_text" \
-    'rm -rf "$scratch_dir"'
+    "$script_text" '${TMPDIR:-/tmp}/agent-statusline-codex-patch-build'
+assert_not_contains "scratch dir has a fixed name, not a fresh mktemp per run (never more than one on disk)" \
+    "$script_text" 'mktemp -d "${TMPDIR:-/tmp}/agent-statusline-codex-patch'
+assert_contains "wipes the scratch dir before building, so a crash/kill-9 run can't leave a second one behind" \
+    "$script_text" 'rm -rf "$scratch_dir"
+mkdir -p "$scratch_dir"'
+assert_contains "also cleans up its scratch dir on a normal exit, success or failure" "$script_text" \
+    "trap 'rm -rf \"\$scratch_dir\"' EXIT"
 
 section "idempotent short-circuit: already-installed marker skips clone/build entirely"
 patch_hash="$(shasum -a 256 "$PATCH" | awk '{print $1}')"

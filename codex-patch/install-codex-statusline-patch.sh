@@ -49,13 +49,18 @@ fi
 
 # Source clone + Cargo build artifacts run several GB per Codex version and
 # are pure build scratch, never something this project owns persistently -
-# they belong under /tmp, not ~/opt. A trap removes the scratch dir when this
-# script exits, success or failure, so a version that's no longer current
-# never lingers on disk (this replaced a design that cached one such tree per
-# version forever under $RUNTIME/source-<version>/ and never cleaned any of
-# them up - see git history if reviving cross-run build-cache reuse is ever
-# worth revisiting).
-scratch_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-codex-patch.XXXXXX")"
+# they belong under /tmp, not ~/opt. A single fixed-name scratch dir (never
+# mktemp'd per-run) keeps this to exactly one directory on disk no matter how
+# many times this script runs: it's wiped before every build (so a run that
+# unwinds via crash or kill -9, which skips the EXIT trap below, still can't
+# leave more than one behind - the next run's wipe catches it) and removed
+# again on a clean exit, success or failure. This replaced a design that
+# cached one such tree per Codex version forever under
+# $RUNTIME/source-<version>/ and never cleaned any of them up - see git
+# history if reviving cross-run build-cache reuse is ever worth revisiting.
+scratch_dir="${TMPDIR:-/tmp}/agent-statusline-codex-patch-build"
+rm -rf "$scratch_dir"
+mkdir -p "$scratch_dir"
 trap 'rm -rf "$scratch_dir"' EXIT
 source_dir="$scratch_dir/source"
 
