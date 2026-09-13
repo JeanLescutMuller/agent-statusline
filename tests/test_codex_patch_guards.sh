@@ -61,8 +61,10 @@ assert_not_contains "does not strip the signed official code-mode host" "$script
     'strip "$destination/bin/codex" "$destination/bin/codex-code-mode-host"'
 assert_contains "smoke-tests codex-code-mode-host before marking success" "$script_text" \
     '"$destination/bin/codex-code-mode-host" --help'
-assert_contains "reuses a verified source tree after an interrupted build" "$script_text" \
-    'Reusing verified Codex %s source and build cache'
+assert_contains "builds in a scratch dir under TMPDIR, never under the persistent runtime dir" \
+    "$script_text" '${TMPDIR:-/tmp}/agent-statusline-codex-patch'
+assert_contains "cleans up its scratch dir on exit, success or failure" "$script_text" \
+    'rm -rf "$scratch_dir"'
 
 section "idempotent short-circuit: already-installed marker skips clone/build entirely"
 patch_hash="$(shasum -a 256 "$PATCH" | awk '{print $1}')"

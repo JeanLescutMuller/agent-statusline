@@ -47,34 +47,33 @@ if [ -x "$destination/bin/codex" ] \
     exit 0
 fi
 
-source_dir="$RUNTIME/source-$version"
-if [ -d "$source_dir/.git" ] \
-    && [ "$(git -C "$source_dir" rev-parse HEAD 2>/dev/null)" = "$commit" ] \
-    && git -C "$source_dir" apply --reverse --check "$patch_file" >/dev/null 2>&1 \
-    && grep -q '^#!\[recursion_limit = "256"\]' "$source_dir/codex-rs/cli/src/main.rs"; then
-    printf 'Reusing verified Codex %s source and build cache...\n' "$version"
-else
-    printf 'Preparing Codex %s source...\n' "$version"
-    rm -rf "$source_dir.new"
-    git clone --quiet https://github.com/openai/codex.git "$source_dir.new" >>"$BUILD_LOG" 2>&1 \
-        || die "source download failed"
-    git -C "$source_dir.new" checkout --quiet "$commit" >>"$BUILD_LOG" 2>&1 \
-        || die "upstream commit checkout failed"
-    git -C "$source_dir.new" apply --check "$patch_file" >>"$BUILD_LOG" 2>&1 \
-        || die "patch no longer applies cleanly"
-    git -C "$source_dir.new" apply "$patch_file" >>"$BUILD_LOG" 2>&1 \
-        || die "patch application failed"
+# Source clone + Cargo build artifacts run several GB per Codex version and
+# are pure build scratch, never something this project owns persistently -
+# they belong under /tmp, not ~/opt. A trap removes the scratch dir when this
+# script exits, success or failure, so a version that's no longer current
+# never lingers on disk (this replaced a design that cached one such tree per
+# version forever under $RUNTIME/source-<version>/ and never cleaned any of
+# them up - see git history if reviving cross-run build-cache reuse is ever
+# worth revisiting).
+scratch_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-codex-patch.XXXXXX")"
+trap 'rm -rf "$scratch_dir"' EXIT
+source_dir="$scratch_dir/source"
 
-    # Rust 1.98 needs a larger macro recursion allowance for this pinned release.
-    # This is build compatibility only; it is deliberately outside the functional patch.
-    cli_main="$source_dir.new/codex-rs/cli/src/main.rs"
-    if ! grep -q '^#!\[recursion_limit = "256"\]' "$cli_main"; then
-        { printf '#![recursion_limit = "256"]\n'; cat "$cli_main"; } > "$cli_main.tmp"
-        mv "$cli_main.tmp" "$cli_main"
-    fi
-    rm -rf "$source_dir"
-    mv "$source_dir.new" "$source_dir"
-fi
+printf 'Preparing Codex %s source...\n' "$version"
+git clone --quiet https://github.com/openai/codex.git "$source_dir" >>"$BUILD_LOG" 2>&1 \
+    || die "source download failed"
+git -C "$source_dir" checkout --quiet "$commit" >>"$BUILD_LOG" 2>&1 \
+    || die "upstream commit checkout failed"
+git -C "$source_dir" apply --check "$patch_file" >>"$BUILD_LOG" 2>&1 \
+    || die "patch no longer applies cleanly"
+git -C "$source_dir" apply "$patch_file" >>"$BUILD_LOG" 2>&1 \
+    || die "patch application failed"
+
+# Rust 1.98 needs a larger macro recursion allowance for this pinned release.
+# This is build compatibility only; it is deliberately outside the functional patch.
+cli_main="$source_dir/codex-rs/cli/src/main.rs"
+{ printf '#![recursion_limit = "256"]\n'; cat "$cli_main"; } > "$cli_main.tmp"
+mv "$cli_main.tmp" "$cli_main"
 
 code_mode_host_source="$(dirname "$CODEX_BIN")/codex-code-mode-host"
 [ -x "$code_mode_host_source" ] \
