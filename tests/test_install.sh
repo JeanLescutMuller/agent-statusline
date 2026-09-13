@@ -4,8 +4,8 @@
 # restricted PATH that excludes ~/.local/bin, where it's really installed) -
 # actually exercising the Codex binary patch would mean a real network clone
 # and Cargo build, which does not belong in this test suite. The TOML-merge
-# logic that install.sh's Codex-config step drives is instead exercised
-# directly below, by extracting the real heredoc rather than retyping it.
+# logic that install.sh's Codex-config step drives lives in its own file,
+# codex-patch/merge_codex_config.py, exercised directly below.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -37,11 +37,11 @@ assert_file_missing "the Codex binary patch is not built/deployed" "$th_home/.co
 assert_file_missing "~/.codex/config.toml is not touched" "$th_home/.codex/config.toml"
 
 section "deploys the shared lib and provider adapters"
-assert_file_exists "lib deployed under ~/opt/agent-statusline" "$th_home/opt/agent-statusline/lib/statusline-cache.sh"
+assert_file_exists "lib deployed under ~/opt/agent-statusline" "$th_home/opt/agent-statusline/src/statusline/cache.sh"
 assert_file_exists "Claude quota refresh script deployed as part of the shared lib" \
-    "$th_home/opt/agent-statusline/lib/statusline-refresh-claude-quota.sh"
+    "$th_home/opt/agent-statusline/src/statusline/refresh-claude-quota.sh"
 assert_file_exists "Claude adapter deployed" "$th_home/.claude/statusline-command.sh"
-diff -q "$REPO_ROOT/lib/statusline-cache.sh" "$th_home/opt/agent-statusline/lib/statusline-cache.sh" >/dev/null
+diff -q "$REPO_ROOT/src/statusline/cache.sh" "$th_home/opt/agent-statusline/src/statusline/cache.sh" >/dev/null
 assert_status "deployed lib matches the repo source" 0 $?
 
 section "deploys the quota pollers and their LaunchAgent"
@@ -66,174 +66,8 @@ assert_status "exits 0" 0 "$TH_STATUS"
 assert_not_contains "no file gets re-installed on an unchanged re-run" "$TH_OUT" "[+]"
 rm -rf "$th_home"
 
-section "legacy runtime migration"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-legacy="$th_home/opt/bootstrap-home/statusline"
-mkdir -p "$legacy/state/static" "$legacy/locks" "$legacy/logs"
-printf 'legacy-host\n' > "$legacy/state/static/hostname"
-printf 'legacy-log\n' > "$legacy/logs/statusline.log"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports the migration" "$TH_OUT" "migrated runtime state"
-assert_file_exists "state moved to the new runtime dir" "$th_home/opt/agent-statusline/state/static/hostname"
-assert_eq "migrated content is preserved, not regenerated" "legacy-host" "$(cat "$th_home/opt/agent-statusline/state/static/hostname")"
-assert_file_exists "logs moved to the new runtime dir" "$th_home/opt/agent-statusline/logs/statusline.log"
-assert_file_missing "the legacy runtime dir is gone" "$legacy"
-rm -rf "$th_home"
-
-section "migrates agent-quota-tracker's live deployment"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-old_folder="$th_home/opt/agent-quota-tracker"
-mkdir -p "$old_folder/data" "$th_home/Library/LaunchAgents"
-printf '{"ts":1,"source":"claude","api":{}}\n' > "$old_folder/data/quota-log.jsonl"
-printf 'fake plist\n' > "$th_home/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports the migration" "$TH_OUT" "migrated from ~/opt/agent-quota-tracker"
-assert_file_missing "the old deployed folder is gone" "$old_folder"
-assert_file_missing "the old LaunchAgent symlink is removed" \
-    "$th_home/Library/LaunchAgents/com.jeanlescut.agent-quota-tracker.plist"
-assert_file_missing "its data/ is carried forward, then immediately split by the per-provider migration below" \
-    "$th_home/opt/agent-statusline/data/quota-log.jsonl"
-assert_contains "carried-forward content is preserved, not regenerated" \
-    "$(cat "$th_home/opt/agent-statusline/data/claude-quota-history.jsonl")" '"ts":1'
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_not_contains "no migration message on a second run - old folder is already gone" \
-    "$TH_OUT" "migrated from ~/opt/agent-quota-tracker"
-rm -rf "$th_home"
-
-section "removes an orphaned pre-rename quota/ deploy dir"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-mkdir -p "$th_home/opt/agent-statusline/quota"
-printf 'stale\n' > "$th_home/opt/agent-statusline/quota/poll_claude.py"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports the cleanup" "$TH_OUT" "removed orphaned"
-assert_file_missing "the orphaned dir is gone" "$th_home/opt/agent-statusline/quota"
-assert_file_exists "the current location is deployed instead" \
-    "$th_home/opt/agent-statusline/src/quota_polling/poll_claude.py"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_not_contains "no cleanup message on a second run - old dir is already gone" \
-    "$TH_OUT" "removed orphaned"
-rm -rf "$th_home"
-
-section "moves poll_claude.py/poll_codex.py/poll_all.py out of adhoc_quotas_analysis/ into src/quota_polling/"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-mkdir -p "$th_home/opt/agent-statusline/adhoc_quotas_analysis"
-for f in poll_claude.py poll_codex.py poll_all.py; do
-    printf 'stale\n' > "$th_home/opt/agent-statusline/adhoc_quotas_analysis/$f"
-done
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports the poll_claude.py cleanup" "$TH_OUT" \
-    "removed orphaned $th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
-assert_contains "reports the poll_codex.py cleanup" "$TH_OUT" \
-    "removed orphaned $th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_codex.py"
-assert_contains "reports the poll_all.py cleanup" "$TH_OUT" \
-    "removed orphaned $th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_all.py"
-assert_file_missing "poll_claude.py is gone from the old location" \
-    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_claude.py"
-assert_file_missing "poll_codex.py is gone from the old location" \
-    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_codex.py"
-assert_file_missing "poll_all.py is gone from the old location" \
-    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/poll_all.py"
-diff -q "$REPO_ROOT/src/quota_polling/poll_claude.py" \
-    "$th_home/opt/agent-statusline/src/quota_polling/poll_claude.py" >/dev/null
-assert_status "the current location got the real deployed content, not the stale stub" 0 $?
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_not_contains "no cleanup message on a second run - old copies are already gone" \
-    "$TH_OUT" "removed orphaned"
-rm -rf "$th_home"
-
-section "renames data/token-events.jsonl + data/codex-token-events.jsonl into adhoc_quotas_analysis/"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-mkdir -p "$th_home/opt/agent-statusline/data"
-printf '{"ts":1,"model":"claude-sonnet-5"}\n' > "$th_home/opt/agent-statusline/data/token-events.jsonl"
-printf '{"ts":2,"session_id":"abc"}\n' > "$th_home/opt/agent-statusline/data/codex-token-events.jsonl"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports the claude rename" "$TH_OUT" \
-    "renamed data/token-events.jsonl -> adhoc_quotas_analysis/claude-token-events.jsonl"
-assert_contains "reports the codex rename" "$TH_OUT" \
-    "renamed data/codex-token-events.jsonl -> adhoc_quotas_analysis/codex-token-events.jsonl"
-assert_file_missing "old claude filename is gone" "$th_home/opt/agent-statusline/data/token-events.jsonl"
-assert_file_missing "old codex filename is gone" "$th_home/opt/agent-statusline/data/codex-token-events.jsonl"
-assert_contains "claude content is preserved, not regenerated" \
-    "$(cat "$th_home/opt/agent-statusline/adhoc_quotas_analysis/claude-token-events.jsonl")" '"ts":1'
-assert_contains "codex content is preserved, not regenerated" \
-    "$(cat "$th_home/opt/agent-statusline/adhoc_quotas_analysis/codex-token-events.jsonl")" '"ts":2'
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_not_contains "no rename message on a second run - already migrated" \
-    "$TH_OUT" "renamed data/token-events.jsonl"
-rm -rf "$th_home"
-
-section "renames a pre-existing data/utilization-log.jsonl to quota-log.jsonl, then splits it by provider"
-# Both one-time migrations run back to back in a single install, so a
-# deployment still on the oldest name goes straight from
-# utilization-log.jsonl to the two current per-provider files in one pass -
-# nothing is ever left sitting on the intermediate quota-log.jsonl name.
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-mkdir -p "$th_home/opt/agent-statusline/data"
-printf '{"ts":1,"source":"claude","api":{}}\n{"ts":2,"source":"codex","codex_rate_limits":{}}\n' \
-    > "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports the rename" "$TH_OUT" "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
-assert_contains "reports the split" "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
-assert_file_missing "the oldest filename is gone" "$th_home/opt/agent-statusline/data/utilization-log.jsonl"
-assert_file_missing "the intermediate filename is gone" "$th_home/opt/agent-statusline/data/quota-log.jsonl"
-assert_contains "the claude row landed in claude-quota-history.jsonl" \
-    "$(cat "$th_home/opt/agent-statusline/data/claude-quota-history.jsonl")" '"ts":1'
-assert_contains "the codex row landed in codex-quota-history.jsonl" \
-    "$(cat "$th_home/opt/agent-statusline/data/codex-quota-history.jsonl")" '"ts":2'
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_not_contains "no rename message on a second run - old filenames are already gone" \
-    "$TH_OUT" "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
-assert_not_contains "no split message on a second run - already split" \
-    "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
-rm -rf "$th_home"
-
-section "splits an already-current-named data/quota-log.jsonl with no legacy utilization-log.jsonl"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-mkdir -p "$th_home/opt/agent-statusline/data"
-printf '{"ts":1,"source":"claude","api":{}}\n{"ts":2,"source":"codex","codex_rate_limits":{}}\n{"ts":3}\n' \
-    > "$th_home/opt/agent-statusline/data/quota-log.jsonl"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports the split" "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
-assert_file_missing "the combined filename is gone" "$th_home/opt/agent-statusline/data/quota-log.jsonl"
-claude_content="$(cat "$th_home/opt/agent-statusline/data/claude-quota-history.jsonl")"
-assert_contains "explicit claude row lands in the claude file" "$claude_content" '"ts":1'
-assert_contains "a sourceless row defaults to claude" "$claude_content" '"ts":3'
-assert_contains "the codex row lands in the codex file" \
-    "$(cat "$th_home/opt/agent-statusline/data/codex-quota-history.jsonl")" '"ts":2'
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_not_contains "no split message on a second run - already split" \
-    "$TH_OUT" "wrote claude-quota-history.jsonl and codex-quota-history.jsonl"
-rm -rf "$th_home"
-
-section "orphaned pre-2026-08-30 usage-fetch helper is removed"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-mkdir -p "$th_home/.claude"
-printf 'stale\n' > "$th_home/.claude/statusline-usage-fetch.sh"
-run_install "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_file_missing "the orphaned helper is cleaned up, replaced by the shared lib's refresh script" \
-    "$th_home/.claude/statusline-usage-fetch.sh"
-rm -rf "$th_home"
-
-section "Codex [tui] config merge (the real heredoc, extracted, not retyped)"
-merge_script="$(mktemp "${TMPDIR:-/tmp}/th-merge.XXXXXX.py")"
-awk '/<<.PY.$/{flag=1; next} /^PY$/{flag=0} flag' "$INSTALL" > "$merge_script"
-assert_file_exists "extracted the merge script from install.sh" "$merge_script"
-[ -s "$merge_script" ]
-assert_status "extracted script is non-empty" 0 $?
+section "Codex [tui] config merge"
+merge_script="$REPO_ROOT/codex-patch/merge_codex_config.py"
 
 merge_dir="$(mktemp -d "${TMPDIR:-/tmp}/th-mergecfg.XXXXXX")"
 
@@ -241,7 +75,8 @@ section "  no existing config.toml"
 config="$merge_dir/none/config.toml"
 CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" python3 "$merge_script" >/dev/null
 assert_file_exists "creates config.toml with a [tui] table" "$config"
-assert_contains "sets status_line_command" "$(cat "$config")" "status_line_command"
+assert_contains "selects the custom status-line item" "$(cat "$config")" 'status_line = ["custom"]'
+assert_not_contains "does not write the obsolete command table" "$(cat "$config")" "status_line_command"
 
 section "  existing [tui] table with unrelated keys is preserved"
 config="$merge_dir/unrelated/config.toml"
@@ -256,11 +91,11 @@ EOF
 CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" python3 "$merge_script" >/dev/null
 assert_contains "keeps the unrelated [tui] key" "$(cat "$config")" "some_unrelated_key = true"
 assert_contains "keeps the unrelated table entirely" "$(cat "$config")" "[other_table]"
-assert_contains "adds the status line keys" "$(cat "$config")" "status_line_command"
+assert_contains "adds the status line keys" "$(cat "$config")" 'status_line = ["custom"]'
 python3 -c "import tomllib,sys; tomllib.load(open('$config','rb'))"
 assert_status "result is still valid TOML" 0 $?
 
-section "  stale status_line_command table is replaced, not duplicated"
+section "  stale status_line_command table is removed"
 config="$merge_dir/stale/config.toml"
 mkdir -p "$(dirname "$config")"
 cat > "$config" <<'EOF'
@@ -274,11 +109,11 @@ refresh_interval = 99
 EOF
 CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" python3 "$merge_script" >/dev/null
 occurrences="$(grep -c 'status_line_command' "$config")"
-assert_eq "exactly one [tui.status_line_command] table after the merge" "1" "$occurrences"
+assert_eq "no dead [tui.status_line_command] table remains after the merge" "0" "$occurrences"
 assert_not_contains "the stale command path is gone" "$(cat "$config")" "/old/stale/path.sh"
 python3 -c "import tomllib,sys; tomllib.load(open('$config','rb'))"
 assert_status "result is still valid TOML" 0 $?
 
-rm -rf "$merge_dir" "$merge_script"
+rm -rf "$merge_dir"
 
 harness_summary

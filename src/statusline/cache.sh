@@ -17,19 +17,23 @@ statusline_cache_init() {
 
 # Log cache activity, not every render. Per-render logging would produce about
 # 650k lines/day at 30 sessions and a four-second Codex refresh interval.
+# log_file/max_bytes default to the shared statusline.log - pass them
+# explicitly for a dedicated, independently-rotated debug log instead (see
+# codex-statusline-command.sh's carousel-frame log).
 statusline_log_event() {
-    local now="$1" event="$2" details="${3:-}" size=0
-    mkdir -p "$STATUSLINE_LOG_DIR"
-    if [ -f "$STATUSLINE_LOG_FILE" ]; then
-        size="$(stat -f %z "$STATUSLINE_LOG_FILE" 2>/dev/null \
-            || stat -c %s "$STATUSLINE_LOG_FILE" 2>/dev/null \
+    local now="$1" event="$2" details="${3:-}" \
+        log_file="${4:-$STATUSLINE_LOG_FILE}" max_bytes="${5:-$STATUSLINE_LOG_MAX_BYTES}" size=0
+    mkdir -p "$(dirname "$log_file")"
+    if [ -f "$log_file" ]; then
+        size="$(stat -f %z "$log_file" 2>/dev/null \
+            || stat -c %s "$log_file" 2>/dev/null \
             || printf '0')"
     fi
-    if [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -ge "$STATUSLINE_LOG_MAX_BYTES" ]; then
-        mv "$STATUSLINE_LOG_FILE" "${STATUSLINE_LOG_FILE}.1" 2>/dev/null || true
+    if [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -ge "$max_bytes" ]; then
+        mv "$log_file" "${log_file}.1" 2>/dev/null || true
     fi
     printf '%s event=%s%s%s\n' "$now" "$event" "${details:+ }" "$details" \
-        >> "$STATUSLINE_LOG_FILE" 2>/dev/null || true
+        >> "$log_file" 2>/dev/null || true
 }
 
 statusline_cache_is_fresh() {
@@ -189,6 +193,32 @@ statusline_write_values_if_stale() {
     mv "$timestamp_tmp" "${cache_file}.timestamp"
     statusline_log_event "$now" payload_cache_write "key=$lock_key"
     statusline_lock_release
+}
+
+# Liveness signal for src/quota_polling/'s watched-vs-idle poll cadence (see
+# each poller's own module docstring) - content doesn't matter, only mtime,
+# so a plain overwrite is fine, no lock needed.
+statusline_touch_heartbeat() {
+    local provider="$1" now="$2"
+    mkdir -p "$STATUSLINE_STATE_DIR/heartbeat"
+    printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/heartbeat/$provider" 2>/dev/null || true
+}
+
+# Overlays cached FS-separated quota values onto the caller's own
+# five_pct/five_reset/week_pct/week_reset (same implicit-variable convention
+# as statusline_common_segments in format.sh) - only overlays fields the
+# cache has a non-empty value for, so a partially-seeded cache can't blank
+# out a caller's already-live value.
+statusline_overlay_quota_cache() {
+    local quota_cache="$1"
+    local cached_five_pct cached_five_reset cached_week_pct cached_week_reset
+    [ -f "$quota_cache" ] || return
+    IFS="$STATUSLINE_FIELD_SEPARATOR" read -r cached_five_pct cached_five_reset \
+        cached_week_pct cached_week_reset < "$quota_cache"
+    [ -n "$cached_five_pct" ] && five_pct="$cached_five_pct"
+    [ -n "$cached_five_reset" ] && five_reset="$cached_five_reset"
+    [ -n "$cached_week_pct" ] && week_pct="$cached_week_pct"
+    [ -n "$cached_week_reset" ] && week_reset="$cached_week_reset"
 }
 
 statusline_read_static() {

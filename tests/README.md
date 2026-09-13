@@ -35,18 +35,19 @@ pages 1/2/3 as they come up.
 | File | Covers |
 |---|---|
 | `harness.sh` | The assert helpers + fixture/isolation utilities every test file sources |
-| `test_format.sh` | `lib/statusline-format.sh` - pure functions |
-| `test_cache.sh` | `lib/statusline-cache.sh` - freshness, locking, refresh/write, static read, log rotation |
-| `test_refresh_git_local.sh` | `lib/statusline-refresh-git-local.sh` against real temp repos |
-| `test_refresh_git_remote.sh` | `lib/statusline-refresh-git-remote.sh` against a real local bare remote |
-| `test_refresh_metrics.sh` | `lib/statusline-refresh-metrics.sh` on the real host |
-| `test_refresh_claude_quota.sh` | `lib/statusline-refresh-claude-quota.sh` - reading a fixture agent-quota-tracker log, including the epoch-parsing filter's three timestamp formats |
+| `test_format.sh` | `src/statusline/format.sh` - pure functions |
+| `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh/write, static read, log rotation |
+| `test_refresh_git_local.sh` | `src/statusline/refresh-git-local.sh` against real temp repos |
+| `test_refresh_git_remote.sh` | `src/statusline/refresh-git-remote.sh` against a real local bare remote |
+| `test_refresh_metrics.sh` | `src/statusline/refresh-metrics.sh` on the real host |
+| `test_refresh_claude_quota.sh` | `src/statusline/refresh-claude-quota.sh` - reading a fixture agent-quota-tracker log, including the epoch-parsing filter's three timestamp formats |
 | `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end |
 | `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |
-| `test_install.sh` | `install.sh` - idempotency, legacy migration, Codex-absent skip, the real TOML-merge heredoc |
+| `test_install.sh` | `install.sh` - idempotency, Codex-absent skip, the real TOML-merge heredoc |
+| `test_uninstall.sh` | `uninstall.sh` - full removal, `data/`/`codex-patch/` preserved, orphan reporting |
 | `test_codex_patch_guards.sh` | `codex-patch/install-codex-statusline-patch.sh` guard clauses only |
 | `test_utils.sh` | `utils.sh` |
-| `test_repo_hygiene.sh` | `bash -n` on every script, shellcheck if installed, and the `codex-patch/` vs `lib/`+`providers/` architecture boundary from README.md |
+| `test_repo_hygiene.sh` | `bash -n` on every script, shellcheck if installed, and the `codex-patch/` vs `src/statusline/`+`providers/` architecture boundary from README.md |
 
 ## Fixtures
 

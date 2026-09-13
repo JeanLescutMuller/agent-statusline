@@ -15,29 +15,46 @@ Four independent mandates, kept in separate trees — see README.md's
 
 ```
 agent-statusline/
-├── install.sh                    # deploy: shared lib, adapters, src/quota_polling/ + adhoc_quotas_analysis/ + their LaunchAgent; drives codex-patch/ conditionally
-├── utils.sh                      # shared echo/color helpers for install.sh and the patch script
-├── lib/                          # statusline architecture: shared cache/format lib + refresh scripts
-│   ├── statusline-refresh-claude-quota.sh   # fallback: reads the claude quota log
-│   └── statusline-push-claude-quota.sh      # primary: pushes live rate_limits to the claude quota log
-├── providers/                    # statusline architecture: Claude/Codex payload adapters, call into lib/
+├── install.sh                    # deploy onto a bare machine: shared lib, adapters, src/quota_polling/ + adhoc_quotas_analysis/ + their LaunchAgent; drives codex-patch/ conditionally. No migration logic - see uninstall.sh
+├── uninstall.sh                  # removes everything install.sh deploys; preserves data/ and codex-patch/; flags anything else left under ~/opt/agent-statusline as an orphan
+├── utils.sh                      # shared echo/color helpers for install.sh, uninstall.sh, and the patch script
+├── providers/                    # statusline architecture: Claude/Codex payload adapters, call into src/statusline/
 ├── src/
+│   ├── statusline/                # statusline architecture: shared cache/format lib + refresh scripts
+│   │   ├── refresh-claude-quota.sh   # fallback: reads the claude quota log
+│   │   └── push-claude-quota.sh      # primary: pushes live rate_limits to the claude quota log
 │   └── quota_polling/            # quota polling: LaunchAgent-scheduled, deployed, unattended production code
 │       ├── poll_claude.py / poll_codex.py       # per-provider pollers
-│       └── poll_all.py                          # the actual LaunchAgent entry point, runs both as subprocesses
+│       ├── poll_all.py                          # the actual LaunchAgent entry point, runs both as subprocesses
+│       └── com.jeanlescut.agent-statusline.plist.template  # __PYTHON3__/__RUNTIME__ placeholders, filled by install.sh
 ├── adhoc_quotas_analysis/        # quota research: folded in from the former agent-quota-tracker repo,
 │                                 # full git history preserved under this prefix (see its own AGENTS.md)
-│   ├── split_quota_log.py        # one-time, idempotent log-split migration, run automatically by install.sh
+│   ├── split_quota_log.py        # one-time, idempotent log-split migration, run by hand only if you still have an old combined data/quota-log.jsonl
 │   ├── recompute_token_events.py / recompute_codex_events.py   # not scheduled, run by hand
 │   ├── analysis.ipynb            # research notebook
 │   └── AGENTS.md                 # deep-dive: investigation, findings, gotchas - not force-merged into this file
 ├── codex-patch/                   # Codex patch: build-time, one-off, unrelated to what runs on a render
 │   ├── install-codex-statusline-patch.sh   # clone/patch/build/deploy the Codex binary
 │   ├── codex_tui.toml       # template merged into ~/.codex/config.toml's [tui] table
-│   └── patches/              # codex-<version>-status-line-command.patch, per pinned version
+│   ├── merge_codex_config.py  # the merge logic, run by install.sh's "codex config" step
+│   ├── supported-versions.tsv # exact release-commit allowlist
+│   └── patches/              # one shared, cross-version status-line patch
 ├── tests/                    # hermetic bash test suite, see tests/README.md
 └── TODO.md                  # deliberately postponed work
 ```
+
+## Install/uninstall
+
+`install.sh` assumes a bare machine and carries no one-time migration logic
+- past renames/restructurings (`lib/` → `src/statusline/`, the
+  `agent-quota-tracker` fold-in, the quota-log filename/split history, see
+  `adhoc_quotas_analysis/AGENTS.md`'s "Naming history") each got a permanent
+  guard block in `install.sh` at the time, and that only ever grows. If a
+  future change needs the same kind of layout migration: run `uninstall.sh`
+  (removes what `install.sh` deploys, preserves `data/` and `codex-patch/`,
+  flags anything else left over as an orphan to check by hand), resolve any
+  reported orphans, then run `install.sh` fresh. Don't add a migration guard
+  back into `install.sh` instead - that's the pattern this pair replaced.
 
 ## Deferred work
 
@@ -52,22 +69,26 @@ idempotent, and quiet: verbose clone/patch/compiler output goes to
 final result print to the terminal. Never drive this build by hand-running
 `cargo`/`git` steps or by polling compiler output through the model.
 
-Only one Codex version is supported at a time (currently 0.150.1, hardcoded
-in the script's `case` statement alongside its pinned upstream commit). To
-add support for a new version: find the commit that introduces
-`status_line_command` support upstream (or re-derive the patch against the
-new pin), add a `codex-patch/patches/codex-<version>-status-line-command.patch`,
-and add a case for it. Idempotency is keyed on `<commit> <patch-sha256>`
-written to a marker file next to the deployed binary — bump the patch file
-and the marker naturally invalidates.
+Supported Codex versions and their exact upstream release commits live in
+`codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.153.0). The
+functional change is one shared patch, with almost all custom Rust isolated in
+its own module. Before adding a release to the allowlist, check that the shared
+patch applies cleanly to that exact tag and compile it; only re-derive the patch
+if upstream changed one of its small integration points. The installer also
+runs `git apply --check` before every fresh build and fails closed for unknown
+versions. Idempotency is keyed on `<commit> <patch-sha256>` written to a marker
+file next to the deployed binary, so changing the shared patch naturally
+invalidates every affected marker.
 
-Nothing in `codex-patch/` is sourced by `lib/` or `providers/`, and nothing
-in `lib/`/`providers/` is sourced by `codex-patch/`. `install.sh` is the only
-file that reaches into both trees.
+Nothing in `codex-patch/` is sourced by `src/statusline/` or `providers/`,
+and nothing in `src/statusline/`/`providers/` is sourced by `codex-patch/`.
+`install.sh`/`uninstall.sh` are the only files that reach into both trees
+(`uninstall.sh` only to know `codex-patch/`'s deployed directory name, so it
+can deliberately leave it alone - see its own header comment).
 
 ## Cross-project dependency
 
-`lib/statusline-cache.sh`'s `statusline_read_static` shells out to
+`src/statusline/cache.sh`'s `statusline_read_static` shells out to
 `~/opt/bootstrap-home/bin/get_host_color` for the deterministic per-host
 color (falls back to a default if absent — not a hard dependency). That
 script is owned by `bootstrap-home`, not this repo.
@@ -89,18 +110,18 @@ than merged into this one, the same way `codex-patch/`'s own conventions
 live in this file rather than README.md).
 
 The coupling between `src/quota_polling/`/`adhoc_quotas_analysis/` and
-`lib/`/`providers/` is file-based, not a `source`/import — see README.md's
-"Architecture" section for exactly which scripts read/write
+`src/statusline/`/`providers/` is file-based, not a `source`/import — see
+README.md's "Architecture" section for exactly which scripts read/write
 `data/claude-quota-history.jsonl` and `data/codex-quota-history.jsonl`
 (split from a single combined `data/quota-log.jsonl` on 2026-08-31 — see
 `adhoc_quotas_analysis/AGENTS.md`'s "Naming history"). One thing worth
 stating plainly here since it's easy to get backwards:
-`lib/statusline-push-claude-quota.sh` is the *primary* Claude quota path
-now (free, rides existing traffic, never rate-limited);
-`lib/statusline-refresh-claude-quota.sh` + `src/quota_polling/poll_claude.py`
-are a *fallback* for the one gap the push path can't cover — a session that
-hasn't sent its first message yet, or a machine-wide idle stretch with no
-statusline rendering anywhere at all.
+`src/statusline/push-claude-quota.sh` is the *primary* Claude
+quota path now (free, rides existing traffic, never rate-limited);
+`src/statusline/refresh-claude-quota.sh` +
+`src/quota_polling/poll_claude.py` are a *fallback* for the one gap the push
+path can't cover — a session that hasn't sent its first message yet, or a
+machine-wide idle stretch with no statusline rendering anywhere at all.
 
 `providers/claude-statusline-command.sh` touches `state/heartbeat/claude`
 on every render specifically so `src/quota_polling/poll_claude.py` can tell a statusline
@@ -110,8 +131,8 @@ just intra-repo now instead of cross-repo.
 
 ## Tests
 
-`bash tests/run.sh` before committing a change to `lib/`, `providers/`,
-`src/quota_polling/`, `adhoc_quotas_analysis/`, `install.sh`, or
+`bash tests/run.sh` before committing a change to `src/statusline/`, `providers/`,
+`src/quota_polling/`, `adhoc_quotas_analysis/`, `install.sh`, `uninstall.sh`, or
 `codex-patch/install-codex-statusline-patch.sh`.
 See `tests/README.md` for what the suite covers and what it deliberately
 doesn't (the real Codex `git clone` + `cargo build` path; live

@@ -119,7 +119,7 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   self-throttle most ticks away, settling to roughly the old flat 5-minute
   cadence while idle (see each script's own module docstring); `poll_claude.py`
   additionally speeds back up to every tick while a Claude Code statusline
-  render touches a heartbeat file (`lib/statusline-push-claude-quota.sh`'s
+  render touches a heartbeat file (`src/statusline/push-claude-quota.sh`'s
   sibling in `../providers/claude-statusline-command.sh` — same repo now,
   see the root `AGENTS.md`'s "Quota tracking" section). This existed
   historically because the statusline side used to poll the same Anthropic
@@ -186,7 +186,7 @@ Renamed three times as a standalone repo, then merged:
    `install.sh` right after the `utilization-log.jsonl` → `quota-log.jsonl`
    rename above so a deployment on the oldest name goes straight to the
    current layout in one pass). `poll_claude.py` and
-   `lib/statusline-push-claude-quota.sh` now write
+   `src/statusline/push-claude-quota.sh` now write
    `claude-quota-history.jsonl`; `poll_codex.py` writes
    `codex-quota-history.jsonl`. `QUOTA_LOG_FILE` (the Python constant name)
    is unchanged in both pollers — only the path it points at differs per
@@ -209,15 +209,27 @@ Renamed three times as a standalone repo, then merged:
    an extra `.parent` (now `parent.parent.parent`, not `parent.parent`) to
    account for the added nesting level - `data/` is still a sibling of
    `src/`, not `adhoc_quotas_analysis/`, in the deployed runtime.
-   `install.sh` migrates both moves forward: removes any pollers still
-   deployed at the pre-split `adhoc_quotas_analysis/poll_*.py` location,
-   and renames any legacy `data/token-events.jsonl` /
-   `data/codex-token-events.jsonl` into this directory.
+   `install.sh` renames any legacy `data/token-events.jsonl` /
+   `data/codex-token-events.jsonl` into this directory (still load-bearing:
+   the live `~/opt/agent-quota-tracker/` fold-in below carries real
+   already-generated copies of both forward under the old names, and this
+   step is what lands them at their current location). The mirror-image
+   `adhoc_quotas_analysis/poll_*.py` orphan cleanup was deleted from
+   `install.sh` on 2026-08-31 (dev-repo simplification pass, same day) once
+   it was confirmed dead: the pre-split poller-under-`adhoc_quotas_analysis/`
+   layout it guarded against had never actually been deployed on this
+   machine, so the block could never fire.
 
-`agent-statusline`'s own `install.sh` self-migrates from any prior layout
-automatically (`migrate_legacy()`-style helpers, one per prior name/repo) —
-carries `data/` forward, boots out the old LaunchAgent label, removes the old
-folder. Idempotent, safe to re-run any time.
+**Update (later than the numbered history above):** `agent-statusline`'s
+`install.sh` no longer self-migrates from any of these prior layouts - the
+`migrate_legacy()`-style one-off guard blocks it used to carry (one per
+prior name/repo, several of them referenced by the steps above) were
+deleted in favor of a bare-machine-only installer plus a companion
+`uninstall.sh` (removes what `install.sh` deploys, preserves `data/`,
+flags anything else as an orphan) - see the root `AGENTS.md`'s
+"Install/uninstall" section. A machine still on an old layout needs
+`uninstall.sh` then a fresh `install.sh`, not an automatic in-place
+migration.
 
 ## Architecture: why the scripts are split this way
 
@@ -293,7 +305,7 @@ check `cleanupPeriodDays` is still 365 first — if it's been dropped back to
 
 Full JSON schema examples are in `README.md`. Quick summary:
 
-- `data/claude-quota-history.jsonl` — shared by two writers, disambiguated by `source` (split from a combined `data/quota-log.jsonl` on 2026-08-31 - see "Naming history"). Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../lib/statusline-push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
+- `data/claude-quota-history.jsonl` — shared by two writers, disambiguated by `source` (split from a combined `data/quota-log.jsonl` on 2026-08-31 - see "Naming history"). Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../src/statusline/push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
 - `data/codex-quota-history.jsonl` — one writer, `poll_codex.py`; every row is `source: "codex"` (since 2026-08-30, the date the Codex poller landed - this file has no rows older than that). Codex poll rows: `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`.
 - `claude-token-events.jsonl` — lives in this directory directly, not `data/` (moved 2026-08-31 - see "Naming history": fully recomputable, so it doesn't need the durable-log treatment `data/` is for). One record per assistant message with usage, full fidelity (model, effort, session/cwd/sidechain identity, verbatim `usage` object including the `cache_creation` 5m/1h split and `output_tokens_details.thinking_tokens`). Deliberately excludes message content. Claude-only (see "Architecture" above).
 - `codex-token-events.jsonl` — also in this directory, not `data/`. Codex analogue, one record per local `token_count` event (roughly one per turn), full fidelity (session id/cwd, `total_token_usage`/`last_token_usage`, and the `rate_limits` snapshot logged alongside it). Built by `recompute_codex_events.py` from local session files only — no API call (see "Architecture" above).

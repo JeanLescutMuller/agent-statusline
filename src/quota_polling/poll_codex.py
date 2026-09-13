@@ -64,6 +64,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import _quota_common
+
 # src/quota_polling/ is deployed two levels under the shared agent-statusline
 # runtime root (~/opt/agent-statusline/src/quota_polling/) - parent.parent.parent,
 # not parent.parent, or this would look for a nonexistent
@@ -172,31 +174,13 @@ def fetch_codex_state() -> tuple[dict | None, dict | None, dict | None]:
 
 
 def _last_codex_log_ts() -> int | None:
-    """Timestamp of the last codex-sourced row, read from the tail of the
-    file rather than a full scan - this runs every tick, forever, and the
-    log only grows. The source filter below is now redundant in the common
-    case (codex-quota-history.jsonl only ever gets `source: "codex"` rows
-    written to it since the 2026-08-31 per-provider split), but kept as a
-    cheap defensive check against a stray/malformed row rather than trusting
-    file identity alone."""
-    if not QUOTA_LOG_FILE.exists():
-        return None
-    with QUOTA_LOG_FILE.open("rb") as f:
-        f.seek(0, 2)
-        size = f.tell()
-        chunk = min(size, 16384)
-        f.seek(size - chunk)
-        data = f.read(chunk)
-    for line in reversed(data.splitlines()):
-        if not line.strip():
-            continue
-        try:
-            d_row = json.loads(line)
-        except json.JSONDecodeError:
-            # A line this close to a 16KB chunk boundary being truncated, or
-            # a corrupt row, are both edge cases - fail open (treat as due)
-            # rather than risk silently going quiet.
-            return None
+    """Timestamp of the last codex-sourced row, from the tail of the log
+    (see _quota_common.tail_json_rows). The source filter is now redundant
+    in the common case (codex-quota-history.jsonl only ever gets
+    `source: "codex"` rows written to it since the 2026-08-31 per-provider
+    split), but kept as a cheap defensive check against a stray/malformed
+    row rather than trusting file identity alone."""
+    for d_row in reversed(_quota_common.tail_json_rows(QUOTA_LOG_FILE)):
         if d_row.get("source") == "codex":
             return d_row.get("ts")
     return None
@@ -229,18 +213,6 @@ def _codex_session_recently_active(now: float) -> bool:
     return False
 
 
-def _is_watched(now: float) -> bool:
-    """Is a Codex statusline rendering somewhere right now? Same shape as
-    poll_claude.py's _is_active(), reading providers/codex-statusline-command.sh's
-    heartbeat file instead of heartbeat/claude. A missing file (statusline
-    not installed, or never rendered) just means this is always False, which
-    degrades gracefully to the flat idle cadence in main()."""
-    try:
-        return (now - HEARTBEAT_FILE.stat().st_mtime) < HEARTBEAT_ACTIVE_WINDOW_SECONDS
-    except OSError:
-        return False
-
-
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -249,7 +221,8 @@ def main() -> None:
         print(f"skip: a Codex session file was modified under {SESSION_FRESH_SECONDS}s ago "
               f"- local rate_limits snapshot is already fresher than a poll would be")
         return
-    threshold = WATCHED_POLL_INTERVAL_SECONDS if _is_watched(now) else IDLE_POLL_INTERVAL_SECONDS
+    is_watched = _quota_common.is_fresh(HEARTBEAT_FILE, HEARTBEAT_ACTIVE_WINDOW_SECONDS, now)
+    threshold = WATCHED_POLL_INTERVAL_SECONDS if is_watched else IDLE_POLL_INTERVAL_SECONDS
     last_ts = _last_codex_log_ts()
     if last_ts is not None and (now - last_ts) < threshold:
         print(f"skip: last codex reading is under {threshold}s old "

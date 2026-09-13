@@ -1,11 +1,12 @@
 #!/bin/bash
 # Prints live Claude quotas as: 5h_pct FS 5h_reset_epoch FS 7d_pct FS 7d_reset_epoch.
 # Cache freshness, locking, timeouts, and atomic writes are owned by
-# statusline-cache.sh; this file performs one refresh attempt only.
+# cache.sh; this file performs one refresh attempt only.
 #
 # This is a rare-path fallback now: claude-statusline-command.sh prefers the
 # live stdin `rate_limits` payload directly (see
-# lib/statusline-push-claude-quota.sh), falling back to this cached value
+# push-claude-quota.sh, its sibling in this directory), falling
+# back to this cached value
 # only for a session that hasn't sent its first message yet. Reads the
 # latest reading from src/quota_polling/poll_claude.py's log
 # (data/claude-quota-history.jsonl, shared with the push path above,
@@ -54,6 +55,6 @@ result="$(tail -n 200 "$log_file" | jq -n -jr --arg separator "$separator" '
       ] | join($separator)
 ' 2>/dev/null)"
 
-[ -n "$result" ] || fail_read "no successful Claude reading found in the last 40 log lines"
+[ -n "$result" ] || fail_read "no successful Claude reading found in the last 200 log lines"
 
 printf '%s\n' "$result"

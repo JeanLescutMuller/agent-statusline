@@ -120,3 +120,56 @@ statusline_git_segment() {
     result="    ${STATUSLINE_GRAY_3}🌿 ${branch}${working}${sync}${conflict}${STATUSLINE_RESET}"
     printf -v "$output_name" '%s' "$result"
 }
+
+# statusline_common_segments - the metrics/git/host-color/path/limit segment
+# assembly shared byte-for-byte by both providers. Not a general-purpose
+# primitive like the functions above (no output_name params, unlike the rest
+# of this file) - it reads $cwd/$now/$context_pct/$five_pct/$five_reset/
+# $week_pct/$week_reset/$lib_dir and sets $git_segment/$host_color/
+# $display_cwd/$context_segment/$five_segment/$week_segment/$memory_segment
+# by relying on the caller already using those exact names (both providers
+# do, by convention), since explicit passing of 7 inputs + 7 outputs would be
+# far noisier than the two identically-named call sites it serves.
+statusline_common_segments() {
+    local metrics_cache="$STATUSLINE_STATE_DIR/system/metrics"
+    statusline_refresh_if_stale "$metrics_cache" 30 system-metrics 3 1 "$now" \
+        bash "$lib_dir/refresh-metrics.sh"
+    local mem_used="" mem_total="" mem_pct=0
+    if [ -f "$metrics_cache" ]; then
+        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r mem_used mem_total mem_pct < "$metrics_cache"
+    fi
+
+    git_segment=""
+    if statusline_git_cache_paths "$cwd"; then
+        statusline_refresh_if_stale "$STATUSLINE_GIT_LOCAL_CACHE" 8 \
+            "git-$STATUSLINE_GIT_KEY-local" 3 1 "$now" \
+            bash "$lib_dir/refresh-git-local.sh" "$STATUSLINE_GIT_ROOT"
+        statusline_refresh_if_stale "$STATUSLINE_GIT_REMOTE_CACHE" 30 \
+            "git-$STATUSLINE_GIT_KEY-remote" 3 1 "$now" \
+            bash "$lib_dir/refresh-git-remote.sh" "$STATUSLINE_GIT_ROOT"
+
+        local branch="" untracked=0 unstaged=0 staged=0 conflicts=0 ahead=0 behind=0
+        [ -f "$STATUSLINE_GIT_LOCAL_CACHE" ] && \
+            IFS="$STATUSLINE_FIELD_SEPARATOR" read -r branch untracked unstaged staged conflicts \
+                < "$STATUSLINE_GIT_LOCAL_CACHE"
+        [ -f "$STATUSLINE_GIT_REMOTE_CACHE" ] && \
+            IFS="$STATUSLINE_FIELD_SEPARATOR" read -r ahead behind < "$STATUSLINE_GIT_REMOTE_CACHE"
+        statusline_git_segment "$branch" "$untracked" "$unstaged" "$staged" \
+            "$conflicts" "$ahead" "$behind" git_segment
+    fi
+
+    statusline_read_static
+    printf -v host_color '\033[38;5;%sm' "$STATUSLINE_HOST_COLOR"
+    statusline_display_path "$cwd" display_cwd
+
+    statusline_context_segment "$context_pct" context_segment
+    statusline_limit_segment 5h "$five_pct" "$five_reset" "$now" five_segment
+    statusline_limit_segment 7d "$week_pct" "$week_reset" "$now" week_segment
+
+    memory_segment=""
+    if [ -n "$mem_used" ] && [ -n "$mem_total" ]; then
+        local memory_color
+        statusline_severity_color "$mem_pct" 70 memory_color
+        memory_segment="    ${memory_color}💾 ${mem_used}G/${mem_total}G${STATUSLINE_RESET}"
+    fi
+}

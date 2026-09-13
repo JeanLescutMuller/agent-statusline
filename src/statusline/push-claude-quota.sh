@@ -9,12 +9,12 @@
 # poller's endpoint is unreliable (~21% 429 rate), this path never is.
 #
 # Called unconditionally on every render, deliberately NOT gated by the
-# usual TTL/lock cache machinery in statusline-cache.sh - it must catch a
+# usual TTL/lock cache machinery in cache.sh - it must catch a
 # message that landed sometime in the last render interval, not just once
 # every 60s. Always exits 0: a failure here must never break the visible
 # statusline.
 #
-# Usage: statusline-push-claude-quota.sh <transcript_path> <five_pct>
+# Usage: push-claude-quota.sh <transcript_path> <five_pct>
 #          <five_reset_iso> <week_pct> <week_reset_iso>
 set -uo pipefail
 

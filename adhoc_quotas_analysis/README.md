@@ -15,7 +15,7 @@ formula. Two pollers plus a free push, writing to two per-provider logs
 "Data files" below): `poll_claude.py` hits
 Anthropic's `GET /api/oauth/usage`; `poll_codex.py` speaks the JSON-RPC
 protocol Codex's own TUI statusline uses (`codex app-server --stdio`), since
-Codex has no plain HTTP equivalent; `../lib/statusline-push-claude-quota.sh`
+Codex has no plain HTTP equivalent; `../src/statusline/push-claude-quota.sh`
 (same repo, runs on every Claude render) appends a reading for free from
 `rate_limits` already present on the statusline's own stdin payload — no
 network call, and unlike the poller, never rate-limited. See `AGENTS.md` for
@@ -222,17 +222,11 @@ the two `recompute_*.py` scripts to
 `~/opt/agent-statusline/adhoc_quotas_analysis/`, writes/refreshes the
 `com.jeanlescut.agent-statusline` LaunchAgent plist (pointed at
 `src/quota_polling/poll_all.py`), and (re)loads it via `launchctl
-bootstrap`. Self-migrating: on a machine that still has a standalone
-`agent-quota-tracker` deployment, detects it (see `AGENTS.md`'s naming
-history) and folds it in automatically, carrying its data forward and
-retiring its LaunchAgent; renames any legacy `data/utilization-log.jsonl`
-to `data/quota-log.jsonl` and runs `split_quota_log.py` to split that into
-the two current per-provider files; renames any legacy
-`data/token-events.jsonl` / `data/codex-token-events.jsonl` into
-`claude-token-events.jsonl` / `codex-token-events.jsonl` in this
-directory; and removes any pollers still deployed at the pre-split
-`adhoc_quotas_analysis/poll_*.py` location — each step idempotent and
-safe to leave wired in permanently.
+bootstrap`. Assumes a bare machine - no self-migration from a standalone
+`agent-quota-tracker` deployment or any other prior layout (see
+`AGENTS.md`'s "Naming history" for what those layouts were). If you're
+moving from one, run the parent repo's `uninstall.sh` first, then
+`install.sh` fresh - see the root `README.md`'s "Usage" section.
 
 ```bash
 python3 ~/opt/agent-statusline/adhoc_quotas_analysis/recompute_token_events.py
@@ -335,7 +329,7 @@ couldn't be started), `timeout`, `rpc` (a JSON-RPC error response, e.g.
 not logged in), and `parse`.
 
 Claude push rows, also in `claude-quota-history.jsonl` (since the 2026-08-31
-agent-statusline merge), written by `../lib/statusline-push-claude-quota.sh`
+agent-statusline merge), written by `../src/statusline/push-claude-quota.sh`
 on real Claude Code renders, not on a timer:
 ```jsonc
 {

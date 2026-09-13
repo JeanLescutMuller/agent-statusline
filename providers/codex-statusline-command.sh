@@ -2,9 +2,9 @@
 # Codex payload adapter and one-line renderer backed by shared lazy caches.
 set -uo pipefail
 
-lib_dir="${STATUSLINE_LIB_DIR:-$HOME/opt/agent-statusline/lib}"
-source "$lib_dir/statusline-cache.sh"
-source "$lib_dir/statusline-format.sh"
+lib_dir="${STATUSLINE_LIB_DIR:-$HOME/opt/agent-statusline/src/statusline}"
+source "$lib_dir/cache.sh"
+source "$lib_dir/format.sh"
 statusline_cache_init
 
 values=()
@@ -49,16 +49,7 @@ payload_week_reset="${values[13]:-}"
 now="${values[14]:-0}"
 page=$((now / 4 % 3 + 1))
 
-# Liveness signal for src/quota_polling/poll_codex.py's watched-vs-idle poll cadence:
-# faster (60s, matching the LaunchAgent's own tick) while this file is fresh
-# and no local session file is fresher still, backing off to the flat idle
-# cadence otherwise - same shape as heartbeat/claude, see
-# lib/statusline-push-claude-quota.sh's sibling logic in
-# claude-statusline-command.sh for why "someone is watching" matters even
-# when nothing local changed: other sessions/devices on the account can
-# still move the meter. Content doesn't matter, only mtime.
-mkdir -p "$STATUSLINE_STATE_DIR/heartbeat"
-printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/heartbeat/codex" 2>/dev/null || true
+statusline_touch_heartbeat codex "$now"
 
 model_display="$model"
 [ -n "$reasoning" ] && model_display="$model ($reasoning)"
@@ -70,54 +61,9 @@ if [ -n "$payload_five_pct" ] || [ -n "$payload_week_pct" ]; then
 fi
 five_pct="${payload_five_pct:-0}"; five_reset="$payload_five_reset"
 week_pct="${payload_week_pct:-0}"; week_reset="$payload_week_reset"
-if [ -f "$quota_cache" ]; then
-    IFS="$STATUSLINE_FIELD_SEPARATOR" read -r cached_five_pct cached_five_reset \
-        cached_week_pct cached_week_reset < "$quota_cache"
-    [ -n "$cached_five_pct" ] && five_pct="$cached_five_pct"
-    [ -n "$cached_five_reset" ] && five_reset="$cached_five_reset"
-    [ -n "$cached_week_pct" ] && week_pct="$cached_week_pct"
-    [ -n "$cached_week_reset" ] && week_reset="$cached_week_reset"
-fi
+statusline_overlay_quota_cache "$quota_cache"
 
-metrics_cache="$STATUSLINE_STATE_DIR/system/metrics"
-statusline_refresh_if_stale "$metrics_cache" 30 system-metrics 3 1 "$now" \
-    bash "$lib_dir/statusline-refresh-metrics.sh"
-mem_used=""; mem_total=""; mem_pct=0
-if [ -f "$metrics_cache" ]; then
-    IFS="$STATUSLINE_FIELD_SEPARATOR" read -r mem_used mem_total mem_pct < "$metrics_cache"
-fi
-
-git_segment=""
-if statusline_git_cache_paths "$cwd"; then
-    statusline_refresh_if_stale "$STATUSLINE_GIT_LOCAL_CACHE" 8 \
-        "git-$STATUSLINE_GIT_KEY-local" 3 1 "$now" \
-        bash "$lib_dir/statusline-refresh-git-local.sh" "$STATUSLINE_GIT_ROOT"
-    statusline_refresh_if_stale "$STATUSLINE_GIT_REMOTE_CACHE" 30 \
-        "git-$STATUSLINE_GIT_KEY-remote" 3 1 "$now" \
-        bash "$lib_dir/statusline-refresh-git-remote.sh" "$STATUSLINE_GIT_ROOT"
-
-    branch=""; untracked=0; unstaged=0; staged=0; conflicts=0; ahead=0; behind=0
-    [ -f "$STATUSLINE_GIT_LOCAL_CACHE" ] && \
-        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r branch untracked unstaged staged conflicts \
-            < "$STATUSLINE_GIT_LOCAL_CACHE"
-    [ -f "$STATUSLINE_GIT_REMOTE_CACHE" ] && \
-        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r ahead behind < "$STATUSLINE_GIT_REMOTE_CACHE"
-    statusline_git_segment "$branch" "$untracked" "$unstaged" "$staged" \
-        "$conflicts" "$ahead" "$behind" git_segment
-fi
-
-statusline_read_static
-printf -v host_color '\033[38;5;%sm' "$STATUSLINE_HOST_COLOR"
-statusline_display_path "$cwd" display_cwd
-statusline_context_segment "$context_pct" context_segment
-statusline_limit_segment 5h "$five_pct" "$five_reset" "$now" five_segment
-statusline_limit_segment 7d "$week_pct" "$week_reset" "$now" week_segment
-
-memory_segment=""
-if [ -n "$mem_used" ] && [ -n "$mem_total" ]; then
-    statusline_severity_color "$mem_pct" 70 memory_color
-    memory_segment="    ${memory_color}💾 ${mem_used}G/${mem_total}G${STATUSLINE_RESET}"
-fi
+statusline_common_segments
 
 extra_segment=""
 [ -n "$thread_title" ] && extra_segment="${extra_segment}    ${STATUSLINE_BLUE}🏷️  ${thread_title}${STATUSLINE_RESET}"
@@ -147,7 +93,18 @@ line_2="${STATUSLINE_GRAY_4}🆔 ${thread_id}${rotate_segment}${STATUSLINE_RESET
 line_3="${context_segment}    ${five_segment}    ${week_segment}${memory_segment}"
 
 case "$page" in
-    1) printf '%s\n' "$line_1" ;;
-    2) printf '%s\n' "$line_2" ;;
-    3) printf '%s\n' "$line_3" ;;
+    1) line="$line_1" ;;
+    2) line="$line_2" ;;
+    3) line="$line_3" ;;
 esac
+
+# Dedicated, independently-rotated debug log (not the shared statusline.log -
+# see its own per-render comment) for TODO.md's "stray trailing character"
+# carousel glitch: %q escapes every byte unambiguously, so a corrupt render
+# is visible here even if it's invisible/misleading on screen, and this
+# proves whether the stray character was ever in OUR output (a bug here) or
+# only appears after Codex's own TUI redraws a shorter line over a longer
+# one (a bug upstream in the patched Codex binary, not this script).
+statusline_log_event "$now" carousel_frame "page=$page line=$(printf '%q' "$line")" \
+    "$STATUSLINE_LOG_DIR/codex-carousel.log" 262144
+printf '%s\n' "$line"

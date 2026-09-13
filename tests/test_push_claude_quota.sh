@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end tests for lib/statusline-push-claude-quota.sh - the free path
+# End-to-end tests for src/statusline/push-claude-quota.sh - the free path
 # that appends a claude_statusline row to the shared quota log from the
 # statusline's own stdin rate_limits, instead of waiting on
 # src/quota_polling/poll_claude.py's network poll. See the script's own header comment
@@ -7,7 +7,7 @@
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
-PUSH="$REPO_ROOT/lib/statusline-push-claude-quota.sh"
+PUSH="$REPO_ROOT/src/statusline/push-claude-quota.sh"
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-pushhome.XXXXXX")"
 trap 'rm -rf "$TH_HOME"' EXIT
 LOG="$TH_HOME/opt/agent-statusline/data/claude-quota-history.jsonl"

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Unit tests for lib/statusline-format.sh - pure functions, no filesystem or
+# Unit tests for src/statusline/format.sh - pure functions, no filesystem or
 # network, so these run fast and deterministic.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
-source "$REPO_ROOT/lib/statusline-format.sh"
+source "$REPO_ROOT/src/statusline/format.sh"
 
 strip_ansi() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
 

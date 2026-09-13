@@ -1,9 +1,9 @@
 #!/bin/bash
-# Unit tests for lib/statusline-refresh-git-local.sh against real temp repos.
+# Unit tests for src/statusline/refresh-git-local.sh against real temp repos.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
-REFRESH="$REPO_ROOT/lib/statusline-refresh-git-local.sh"
+REFRESH="$REPO_ROOT/src/statusline/refresh-git-local.sh"
 SEP=$'\034'
 
 new_repo() {

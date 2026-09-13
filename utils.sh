@@ -10,5 +10,4 @@ step()      { echo -e "\n${GREEN}[*]${NC} $1"; }
 ok()        { echo -e "  ${GREEN}[ok]${NC} $1"; }           # already present, no change
 installed() { echo -e "  ${GREEN}[+]${NC} $1"; }            # just installed/deployed
 skip()      { echo -e "  ${YELLOW}[--]${NC} $1"; }
-warn()      { echo -e "  ${YELLOW}[!]${NC} $1"; }
 fail()      { echo -e "  ${RED}[x]${NC} $1"; }

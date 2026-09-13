@@ -1,10 +1,10 @@
 #!/bin/bash
-# Unit tests for lib/statusline-refresh-git-remote.sh against a real local
+# Unit tests for src/statusline/refresh-git-remote.sh against a real local
 # bare "remote" - no network access, everything happens on disk.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
-REFRESH="$REPO_ROOT/lib/statusline-refresh-git-remote.sh"
+REFRESH="$REPO_ROOT/src/statusline/refresh-git-remote.sh"
 SEP=$'\034'
 
 section "no upstream configured"

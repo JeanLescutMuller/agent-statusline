@@ -1,5 +1,5 @@
 #!/bin/bash
-# Unit tests for lib/statusline-cache.sh - the lazy stale-while-revalidate
+# Unit tests for src/statusline/cache.sh - the lazy stale-while-revalidate
 # primitives every provider adapter is built on. Each section gets its own
 # isolated STATUSLINE_RUNTIME_DIR so tests never see each other's state.
 set -uo pipefail
@@ -7,7 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
 section "statusline_cache_init"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 assert_file_exists "creates the state dir" "$STATUSLINE_STATE_DIR"
 assert_file_exists "creates the locks dir" "$STATUSLINE_LOCK_DIR"
@@ -15,7 +15,7 @@ assert_file_exists "creates the logs dir" "$STATUSLINE_LOG_DIR"
 
 section "statusline_cache_is_fresh"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 cf="$STATUSLINE_STATE_DIR/thing"
 statusline_cache_is_fresh "$cf" 60 1000
@@ -39,7 +39,7 @@ assert_status "non-numeric timestamp: not fresh" 1 $?
 
 section "statusline_lock_acquire / statusline_lock_release"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 statusline_lock_acquire mykey 5 1000
 assert_status "first acquire succeeds" 0 $?
@@ -87,7 +87,7 @@ rm -rf "$STATUSLINE_LOCK_DIR/freshkey.lock"
 
 section "statusline_refresh_if_stale: fresh cache short-circuits"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 cf="$STATUSLINE_STATE_DIR/thing"
 sentinel="$TH_TMP/ran"
@@ -99,7 +99,7 @@ assert_eq "fresh cache: value on disk is untouched" "cached-value" "$(cat "$cf")
 
 section "statusline_refresh_if_stale: stale cache, successful refresh"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 cf="$STATUSLINE_STATE_DIR/thing"
 printf 'old-value\n' > "$cf"
@@ -113,7 +113,7 @@ assert_contains "successful refresh is logged" "$(cat "$STATUSLINE_LOG_DIR/statu
 
 section "statusline_refresh_if_stale: stale cache, failing refresh keeps old data"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 cf="$STATUSLINE_STATE_DIR/thing"
 printf 'old-value\n' > "$cf"
@@ -127,7 +127,7 @@ assert_contains "failure log captures stale_age" "$(cat "$STATUSLINE_LOG_DIR/sta
 
 section "statusline_refresh_if_stale: a live lock held elsewhere defers instead of blocking"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 cf="$STATUSLINE_STATE_DIR/thing"
 sentinel="$TH_TMP/ran"
@@ -144,7 +144,7 @@ rm -rf "$STATUSLINE_LOCK_DIR/thing-key.lock"
 
 section "statusline_refresh_if_stale: recently-failed attempts are throttled, not retried every render"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 cf="$STATUSLINE_STATE_DIR/thing"
 sentinel="$TH_TMP/run-count"
@@ -159,7 +159,7 @@ assert_eq "a second call one second later (still within TTL, lock already releas
 section "statusline_refresh_if_stale: hard timeout kills a hung refresh"
 if command -v perl >/dev/null 2>&1; then
     th_tmp_runtime
-    source "$REPO_ROOT/lib/statusline-cache.sh"
+    source "$REPO_ROOT/src/statusline/cache.sh"
     statusline_cache_init
     cf="$STATUSLINE_STATE_DIR/thing"
     printf 'old-value\n' > "$cf"
@@ -176,7 +176,7 @@ fi
 
 section "statusline_write_values_if_stale"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 cf="$STATUSLINE_STATE_DIR/values"
 statusline_write_values_if_stale "$cf" 60 values-key 5 1000 a b c
@@ -191,7 +191,7 @@ assert_eq "fresh cache: write is skipped, old values remain" "a${STATUSLINE_FIEL
 
 section "statusline_read_static"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 statusline_read_static
 assert_file_exists "generates the hostname file on first read" "$STATUSLINE_STATE_DIR/static/hostname"
@@ -207,7 +207,7 @@ assert_eq "second read reuses the color file" "77" "$STATUSLINE_HOST_COLOR"
 
 section "statusline_git_cache_paths"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 statusline_git_cache_paths "/Users/dev/my-project"
 assert_eq "cache key replaces slashes with dashes" "cwd-Users-dev-my-project" "$STATUSLINE_GIT_KEY"
@@ -216,7 +216,7 @@ assert_eq "remote cache path scoped to the cwd" "$STATUSLINE_STATE_DIR/git/cwd/U
 
 section "log rotation"
 th_tmp_runtime
-source "$REPO_ROOT/lib/statusline-cache.sh"
+source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 STATUSLINE_LOG_MAX_BYTES=100
 head -c 200 /dev/zero | tr '\0' 'x' > "$STATUSLINE_LOG_FILE"

@@ -1,11 +1,18 @@
 #!/bin/bash
-# Idempotent installer for agent-statusline.
+# Idempotent installer for agent-statusline, for a machine with no prior
+# agent-statusline (or predecessor-project) install. Carries no one-time
+# migration logic on purpose: if you're moving between incompatible on-disk
+# layouts (this repo's own history has had several), run uninstall.sh first
+# - it removes everything this script deploys, preserves data/ (irreplaceable
+# quota history), and flags anything left over as an orphan to check by
+# hand - then re-run this script against a clean machine. A bare
+# install/uninstall pair is easier to keep correct forever than an
+# ever-growing pile of one-off legacy-layout guards in this file.
 #
 # Deploys the shared cache/format library and the Claude/Codex provider
-# adapters, migrates any pre-existing bootstrap-home statusline runtime state,
-# deploys the quota-tracking research tooling (folded in from the former
-# agent-quota-tracker repo - see adhoc_quotas_analysis/AGENTS.md) and the
-# scheduled pollers under src/quota_polling/ plus their LaunchAgent, and -
+# adapters, deploys the quota-tracking research tooling (folded in from the
+# former agent-quota-tracker repo - see adhoc_quotas_analysis/AGENTS.md) and
+# the scheduled pollers under src/quota_polling/ plus their LaunchAgent, and -
 # when Codex is installed - builds/deploys the status-line-command patch and
 # wires ~/.codex/config.toml's [tui] status-line keys.
 #
@@ -21,8 +28,7 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 not found on PATH"; exit 1
 PYTHON3="$(command -v python3)"
 
 RUNTIME="$HOME/opt/agent-statusline"
-LIB_DIR="$RUNTIME/lib"
-LEGACY_RUNTIME="$HOME/opt/bootstrap-home/statusline"
+LIB_DIR="$RUNTIME/src/statusline"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 
 echo -e "${GREEN}========================================${NC}"
@@ -49,27 +55,17 @@ _deploy() {
 
 step "shared cache library"
 mkdir -p "$LIB_DIR"
-for f in "$SCRIPT_DIR"/lib/*.sh; do
+for f in "$SCRIPT_DIR"/src/statusline/*.sh; do
     _deploy "$f" "$LIB_DIR/$(basename "$f")"
 done
 
 step "provider adapters"
 _deploy "$SCRIPT_DIR/providers/claude-statusline-command.sh" "$HOME/.claude/statusline-command.sh"
 _deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
-rm -f "$HOME/.claude/statusline-usage-fetch.sh"  # stale pre-2026-08-30 helper, replaced by lib/statusline-refresh-claude-quota.sh
 
 step "runtime state"
-if [ -d "$LEGACY_RUNTIME" ] && [ ! -d "$RUNTIME/state" ]; then
-    mkdir -p "$RUNTIME"
-    for sub in state locks logs; do
-        [ -d "$LEGACY_RUNTIME/$sub" ] && mv "$LEGACY_RUNTIME/$sub" "$RUNTIME/$sub"
-    done
-    rmdir "$LEGACY_RUNTIME" 2>/dev/null || true
-    installed "migrated runtime state from ~/opt/bootstrap-home/statusline"
-else
-    mkdir -p "$RUNTIME/state/static" "$RUNTIME/locks" "$RUNTIME/logs"
-    ok "runtime state"
-fi
+mkdir -p "$RUNTIME/state/static" "$RUNTIME/locks" "$RUNTIME/logs"
+ok "runtime state"
 
 step "quota tracker"
 mkdir -p "$RUNTIME/adhoc_quotas_analysis" "$RUNTIME/data"
@@ -77,144 +73,19 @@ for f in "$SCRIPT_DIR"/adhoc_quotas_analysis/*.py; do
     _deploy "$f" "$RUNTIME/adhoc_quotas_analysis/$(basename "$f")"
 done
 
-# One-time: agent-statusline itself renamed its quota/ deploy dir to
-# adhoc_quotas_analysis/ (see adhoc_quotas_analysis/AGENTS.md's "Naming
-# history") - clean up the orphaned old dir left behind by any prior install.
-# Purely cosmetic (the LaunchAgent plist below is rewritten from scratch
-# every run and already points at the new path), but nothing else will ever
-# remove it otherwise.
-if [ -d "$RUNTIME/quota" ]; then
-    rm -rf "$RUNTIME/quota"
-    installed "removed orphaned $RUNTIME/quota (renamed to adhoc_quotas_analysis/)"
-fi
-
-# One-time: token-events.jsonl / codex-token-events.jsonl moved from data/
-# to adhoc_quotas_analysis/ (renamed with a claude-/codex- prefix - see
-# adhoc_quotas_analysis/AGENTS.md's "Naming history"). Fully recomputable
-# by hand at any time, but migrate any already-generated copy forward
-# rather than leaving it orphaned in data/.
-if [ -f "$RUNTIME/data/token-events.jsonl" ] && [ ! -f "$RUNTIME/adhoc_quotas_analysis/claude-token-events.jsonl" ]; then
-    mv "$RUNTIME/data/token-events.jsonl" "$RUNTIME/adhoc_quotas_analysis/claude-token-events.jsonl"
-    installed "renamed data/token-events.jsonl -> adhoc_quotas_analysis/claude-token-events.jsonl"
-fi
-if [ -f "$RUNTIME/data/codex-token-events.jsonl" ] && [ ! -f "$RUNTIME/adhoc_quotas_analysis/codex-token-events.jsonl" ]; then
-    mv "$RUNTIME/data/codex-token-events.jsonl" "$RUNTIME/adhoc_quotas_analysis/codex-token-events.jsonl"
-    installed "renamed data/codex-token-events.jsonl -> adhoc_quotas_analysis/codex-token-events.jsonl"
-fi
-
 step "quota polling"
 mkdir -p "$RUNTIME/src/quota_polling"
 for f in "$SCRIPT_DIR"/src/quota_polling/*.py; do
     _deploy "$f" "$RUNTIME/src/quota_polling/$(basename "$f")"
 done
 
-# One-time: poll_claude.py/poll_codex.py/poll_all.py moved out of
-# adhoc_quotas_analysis/ into their own src/quota_polling/ tree (see
-# adhoc_quotas_analysis/AGENTS.md's "Naming history") - clean up the
-# orphaned old copies left behind by any prior install. Purely cosmetic
-# (the LaunchAgent plist below is rewritten from scratch every run and
-# already points at the new path), but nothing else will ever remove them
-# otherwise.
-for f in poll_claude.py poll_codex.py poll_all.py; do
-    if [ -f "$RUNTIME/adhoc_quotas_analysis/$f" ]; then
-        rm -f "$RUNTIME/adhoc_quotas_analysis/$f"
-        installed "removed orphaned $RUNTIME/adhoc_quotas_analysis/$f (moved to src/quota_polling/)"
-    fi
-done
-
-# One-time: fold in agent-quota-tracker's live deployment. Its own
-# install.sh had this exact migrate_legacy() idiom for its four prior
-# renames; this applies the same pattern once more, across repos instead of
-# within one (see AGENTS.md's "Quota tracking" section). Booting out its
-# LaunchAgent here isn't optional: leaving it running alongside the one
-# below would mean two independent callers of GET /api/oauth/usage again -
-# the exact problem this merge exists to eliminate.
-OLD_QUOTA_FOLDER="$HOME/opt/agent-quota-tracker"
-OLD_QUOTA_LABEL="com.jeanlescut.agent-quota-tracker"
-if [ -d "$OLD_QUOTA_FOLDER" ]; then
-    # AGENT_STATUSLINE_SKIP_LAUNCHD lets the hermetic test suite exercise this
-    # whole step (plist content, idempotent messaging, data/ migration)
-    # without touching the real machine's launchd - gui/$(id -u) is a real
-    # per-user launchd domain, not something a HOME override can sandbox.
-    [ -n "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ] || \
-        launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENTS/$OLD_QUOTA_LABEL.plist" 2>/dev/null || true
-    rm -f "$LAUNCH_AGENTS/$OLD_QUOTA_LABEL.plist"
-    if [ -d "$OLD_QUOTA_FOLDER/data" ]; then
-        cp -n "$OLD_QUOTA_FOLDER/data/"* "$RUNTIME/data/" 2>/dev/null || true
-    fi
-    rm -rf "$OLD_QUOTA_FOLDER"
-    installed "migrated from ~/opt/agent-quota-tracker (data/ carried forward, old LaunchAgent booted out)"
-fi
-
-# One-time: agent-statusline itself renamed this log's filename
-# (utilization-log.jsonl -> quota-log.jsonl, see adhoc_quotas_analysis/AGENTS.md's
-# "Naming history") after some deployments already had the old name on disk -
-# same migrate-in-place idiom as above, one repo layer up. Guarded so a
-# second run is a no-op once the new name exists.
-if [ -f "$RUNTIME/data/utilization-log.jsonl" ] && [ ! -f "$RUNTIME/data/quota-log.jsonl" ]; then
-    mv "$RUNTIME/data/utilization-log.jsonl" "$RUNTIME/data/quota-log.jsonl"
-    installed "renamed data/utilization-log.jsonl -> data/quota-log.jsonl"
-fi
-
-# One-time: split the combined data/quota-log.jsonl into per-provider files
-# (data/claude-quota-history.jsonl, data/codex-quota-history.jsonl - see
-# adhoc_quotas_analysis/AGENTS.md's "Naming history"). split_quota_log.py
-# itself is idempotent (no-ops if the old file is gone or either new file
-# already exists), so this is safe to leave in place permanently rather
-# than removing it after the first deploy that runs it. Its own stdout
-# distinguishes "actually split" (starts with "wrote ") from a no-op, so
-# that decides which helper reports it, same as everywhere else in this
-# script.
-split_output="$("$PYTHON3" "$RUNTIME/adhoc_quotas_analysis/split_quota_log.py" "$RUNTIME/data")"
-case "$split_output" in
-    *"wrote "*) installed "$(printf '%s\n' "$split_output" | tail -n1)" ;;
-    *)          ok "quota log already split (or nothing to split)" ;;
-esac
-
 QUOTA_LABEL="com.jeanlescut.agent-statusline"
 QUOTA_REAL_PLIST="$RUNTIME/$QUOTA_LABEL.plist"
 QUOTA_LINK_PLIST="$LAUNCH_AGENTS/$QUOTA_LABEL.plist"
 mkdir -p "$LAUNCH_AGENTS"
 QUOTA_PLIST_TMP="$(mktemp)"
-cat > "$QUOTA_PLIST_TMP" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>$QUOTA_LABEL</string>
-
-    <key>ProgramArguments</key>
-    <array>
-        <string>$PYTHON3</string>
-        <string>$RUNTIME/src/quota_polling/poll_all.py</string>
-    </array>
-
-    <!-- Tick every 60s - NOT the same as polling every 60s. Both pollers
-         self-throttle most of these ticks away (see each one's module
-         docstring): poll_claude.py polls every tick while a Claude Code
-         statusline is live, settling to ~5 min once idle; poll_codex.py
-         always settles to ~5 min. -->
-    <key>StartInterval</key>
-    <integer>60</integer>
-
-    <!-- Take a reading immediately when the job is loaded, i.e. at login and
-         every time this script re-bootstraps it. Does NOT address sleep
-         gaps: StartInterval doesn't fire while the Mac is asleep, though
-         launchd does fire once on wake. -->
-    <key>RunAtLoad</key>
-    <true/>
-
-    <key>StandardOutPath</key>
-    <string>$RUNTIME/logs/quota-poll.log</string>
-    <key>StandardErrorPath</key>
-    <string>$RUNTIME/logs/quota-poll.err</string>
-
-    <key>ProcessType</key>
-    <string>Background</string>
-</dict>
-</plist>
-PLIST
+sed -e "s#__PYTHON3__#$PYTHON3#g" -e "s#__RUNTIME__#$RUNTIME#g" \
+    "$SCRIPT_DIR/src/quota_polling/$QUOTA_LABEL.plist.template" > "$QUOTA_PLIST_TMP"
 if [ -f "$QUOTA_REAL_PLIST" ] && diff -q "$QUOTA_PLIST_TMP" "$QUOTA_REAL_PLIST" >/dev/null 2>&1; then
     rm -f "$QUOTA_PLIST_TMP"
     ok "quota poll LaunchAgent"
@@ -246,121 +117,7 @@ DESIRED="$SCRIPT_DIR/codex-patch/codex_tui.toml"
 if ! command -v codex >/dev/null 2>&1; then
     skip "Codex status line (Codex not installed)"
 else
-CODEX_CONFIG="$CONFIG" CODEX_DESIRED="$DESIRED" "$PYTHON3" <<'PY'
-import os
-import re
-import sys
-import tomllib
-from pathlib import Path
-
-config_path = Path(os.environ["CODEX_CONFIG"])
-desired_path = Path(os.environ["CODEX_DESIRED"])
-
-# Keep the source template portable across macOS and Linux while writing the
-# absolute path required by the currently deployed Codex process launcher.
-home_toml = str(Path.home()).replace("\\", "\\\\").replace('"', '\\"')
-desired_text = desired_path.read_text().replace("__HOME__", home_toml)
-desired = tomllib.loads(desired_text)["tui"]
-
-try:
-    text = config_path.read_text()
-except FileNotFoundError:
-    text = ""
-
-try:
-    current = tomllib.loads(text) if text.strip() else {}
-except tomllib.TOMLDecodeError as exc:
-    print(f"  \033[31m✗\033[0m Codex config is invalid TOML - not touching it: {exc}")
-    sys.exit(1)
-
-owned = ("status_line", "status_line_use_colors", "status_line_command")
-current_tui = current.get("tui", {})
-if all(current_tui.get(key) == desired[key] for key in owned):
-    print("  \033[32m✓\033[0m status line")
-    sys.exit(0)
-
-lines = text.splitlines()
-table_re = re.compile(r"^\s*\[([^][]+)]\s*(?:#.*)?$")
-assignment_re = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
-
-# This project owns the complete nested command table. Remove an old copy
-# before inserting the desired one, so refresh-interval changes never create
-# duplicate TOML tables.
-nested_start = None
-nested_end = None
-for index, line in enumerate(lines):
-    match = table_re.match(line)
-    if not match:
-        continue
-    if match.group(1).strip() == "tui.status_line_command":
-        nested_start = index
-        continue
-    if nested_start is not None:
-        nested_end = index
-        break
-if nested_start is not None:
-    if nested_end is None:
-        nested_end = len(lines)
-    del lines[nested_start:nested_end]
-
-# Locate the plain [tui] table. Dotted/nested TUI tables are separate sections.
-tui_start = None
-tui_end = None
-for index, line in enumerate(lines):
-    match = table_re.match(line)
-    if not match:
-        continue
-    if match.group(1).strip() == "tui":
-        tui_start = index
-        continue
-    if tui_start is not None and tui_end is None:
-        tui_end = index
-        break
-
-if tui_start is None:
-    if lines and lines[-1].strip():
-        lines.append("")
-    lines.extend(desired_text.strip().splitlines())
-else:
-    if tui_end is None:
-        tui_end = len(lines)
-
-    # Drop only assignments owned here. Track bracket depth so a hand-written
-    # multiline status_line array is removed as one value.
-    kept = []
-    index = tui_start + 1
-    while index < tui_end:
-        match = assignment_re.match(lines[index])
-        if not match or match.group(1) not in owned:
-            kept.append(lines[index])
-            index += 1
-            continue
-
-        value = lines[index].split("=", 1)[1]
-        depth = value.count("[") - value.count("]")
-        index += 1
-        while depth > 0 and index < tui_end:
-            depth += lines[index].count("[") - lines[index].count("]")
-            index += 1
-
-    while kept and not kept[-1].strip():
-        kept.pop()
-    desired_lines = desired_text.strip().splitlines()[1:]
-    lines[tui_start + 1:tui_end] = kept + desired_lines
-
-new_text = "\n".join(lines).rstrip() + "\n"
-# Parse before replacing the live file, so a bug in the editor cannot corrupt
-# an otherwise valid Codex config.
-tomllib.loads(new_text)
-config_path.parent.mkdir(parents=True, exist_ok=True)
-if config_path.exists():
-    backup = config_path.with_name(config_path.name + ".bak")
-    backup.write_text(text)
-tmp = config_path.with_name(config_path.name + ".tmp")
-tmp.write_text(new_text)
-tmp.replace(config_path)
-print("  \033[32m+\033[0m status line")
-PY
+    CODEX_CONFIG="$CONFIG" CODEX_DESIRED="$DESIRED" "$PYTHON3" "$SCRIPT_DIR/codex-patch/merge_codex_config.py"
 fi
 
 echo ""

@@ -1,12 +1,12 @@
 #!/bin/bash
-# Unit tests for lib/statusline-refresh-metrics.sh. Runs for real on whatever
+# Unit tests for src/statusline/refresh-metrics.sh. Runs for real on whatever
 # platform the suite executes on (macOS vm_stat vs Linux /proc/meminfo) -
 # there's no meaningful way to fake system memory, so this just checks the
 # output shape and internal consistency.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
-REFRESH="$REPO_ROOT/lib/statusline-refresh-metrics.sh"
+REFRESH="$REPO_ROOT/src/statusline/refresh-metrics.sh"
 SEP=$'\034'
 
 section "real system metrics"

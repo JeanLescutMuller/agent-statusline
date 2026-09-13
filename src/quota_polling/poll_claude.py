@@ -27,11 +27,11 @@ machine still settles to roughly the old flat 5-minute cadence instead of a
 token/message activity - a usage window resetting to 0% moves the meter with
 zero new tokens spent, so "is anyone even looking at a statusline" is the
 right signal, not "did tokens move." A missing heartbeat file (statusline
-not installed, or never rendered) just means is_active() is always False,
-which degrades gracefully to the old flat 5-minute cadence.
+not installed, or never rendered) just means the heartbeat check always
+reports not-fresh, which degrades gracefully to the old flat 5-minute cadence.
 
 Note this poller's own `source: "claude"` rows are a fallback path now, not
-the primary one: ../../lib/statusline-push-claude-quota.sh pushes a free
+the primary one: ../statusline/push-claude-quota.sh pushes a free
 `source: "claude_statusline"` reading on every real message, riding
 Claude Code's own in-memory rate_limits state - no network call, never
 rate-limited. This poller still matters for the gap that push path can't
@@ -46,6 +46,8 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+import _quota_common
 
 # src/quota_polling/ is deployed two levels under the shared agent-statusline
 # runtime root (~/opt/agent-statusline/src/quota_polling/) - parent.parent.parent,
@@ -155,49 +157,17 @@ def fetch_usage(token: str) -> tuple[dict | None, dict | None, dict | None]:
                             "detail": exc.msg}
 
 
-def _is_active(now: float) -> bool:
-    """Is a Claude Code statusline rendering somewhere right now?"""
-    try:
-        return (now - HEARTBEAT_FILE.stat().st_mtime) < ACTIVE_WINDOW_SECONDS
-    except OSError:
-        return False
-
-
-def _tail_rows() -> list[dict]:
-    """Parsed rows from the tail of the log, newest last - shared by both
-    lookups below so there's one place doing the truncation-tolerant read."""
-    if not QUOTA_LOG_FILE.exists():
-        return []
-    with QUOTA_LOG_FILE.open("rb") as f:
-        f.seek(0, 2)
-        size = f.tell()
-        chunk = min(size, 16384)
-        f.seek(size - chunk)
-        data = f.read(chunk)
-    lines = [line for line in data.splitlines() if line.strip()]
-    rows = []
-    for line in lines:
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            # A line this close to the 16KB chunk boundary being truncated,
-            # or a corrupt row - skip it rather than risk raising here, this
-            # runs every tick forever.
-            continue
-    return rows
-
-
 def _last_log_row() -> dict | None:
     """The last logged row (any source, any outcome) - used only for the
     idle-cadence fallback below, which deliberately doesn't care which
     poller (Claude or Codex) was last active on this machine."""
-    rows = _tail_rows()
+    rows = _quota_common.tail_json_rows(QUOTA_LOG_FILE)
     return rows[-1] if rows else None
 
 
 def _last_claude_log_row() -> dict | None:
     """The last logged row from THIS poller specifically, not from
-    ../../lib/statusline-push-claude-quota.sh's frequent claude_statusline
+    ../statusline/push-claude-quota.sh's frequent claude_statusline
     pushes into the same claude-quota-history.jsonl file - scanning back
     past intervening push rows is required here, reading the literal last
     line missed a real Retry-After backoff for a full tick once already
@@ -208,7 +178,7 @@ def _last_claude_log_row() -> dict | None:
     point of the backoff check below. The Codex interleaving is gone since
     the 2026-08-31 per-provider file split, but the same discipline still
     applies to claude_statusline rows within this file, so the filter stays)."""
-    for row in reversed(_tail_rows()):
+    for row in reversed(_quota_common.tail_json_rows(QUOTA_LOG_FILE)):
         if row.get("source", "claude") == "claude":
             return row
     return None
@@ -225,7 +195,7 @@ def _should_poll(now: float) -> bool:
                 # Server-mandated backoff always wins, active session or not -
                 # see the note on the retry_after_s capture above.
                 return False
-    if _is_active(now):
+    if _quota_common.is_fresh(HEARTBEAT_FILE, ACTIVE_WINDOW_SECONDS, now):
         return True
     last_row = _last_log_row()
     last_ts = last_row["ts"] if last_row else None

@@ -6,7 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 source "$REPO_ROOT/utils.sh"
 
 section "each helper prints its message"
-for fn in step ok installed skip warn fail; do
+for fn in step ok installed skip fail; do
     out="$("$fn" "hello-$fn")"
     assert_contains "$fn() includes its message" "$out" "hello-$fn"
 done

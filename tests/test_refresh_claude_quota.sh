@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end tests for lib/statusline-refresh-claude-quota.sh. Unlike the old
+# End-to-end tests for src/statusline/refresh-claude-quota.sh. Unlike the old
 # statusline-usage-fetch.sh this replaced, there's no Keychain or network to
 # stub - the script just reads the latest "claude" row out of a fixture
 # quota log, so these tests write that fixture directly. See the script's
@@ -8,7 +8,7 @@
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
-REFRESH="$REPO_ROOT/lib/statusline-refresh-claude-quota.sh"
+REFRESH="$REPO_ROOT/src/statusline/refresh-claude-quota.sh"
 SEP=$'\034'
 
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-quotahome.XXXXXX")"

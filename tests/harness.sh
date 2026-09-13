@@ -100,7 +100,7 @@ th_run() {
 th_tmp_runtime() {
     TH_TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-test.XXXXXX")"
     export STATUSLINE_RUNTIME_DIR="$TH_TMP/runtime"
-    export STATUSLINE_LIB_DIR="$REPO_ROOT/lib"
+    export STATUSLINE_LIB_DIR="$REPO_ROOT/src/statusline"
     mkdir -p "$STATUSLINE_RUNTIME_DIR"
     trap 'rm -rf "$TH_TMP"' EXIT
 }

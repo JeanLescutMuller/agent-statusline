@@ -1,3 +1,4 @@
+Loading ~/.zprofile ...
 diff --git a/codex-rs/tui/src/bottom_pane/status_line_setup.rs b/codex-rs/tui/src/bottom_pane/status_line_setup.rs
 index a5f728e..ba2f582 100644
 --- a/codex-rs/tui/src/bottom_pane/status_line_setup.rs
@@ -64,7 +65,7 @@ index 4783f55..38371f3 100644
  
      (!spans.is_empty()).then(|| Line::from(spans))
 diff --git a/codex-rs/tui/src/chatwidget.rs b/codex-rs/tui/src/chatwidget.rs
-index 15c9b32..83a27d2 100644
+index 4b601e5..536c6ce 100644
 --- a/codex-rs/tui/src/chatwidget.rs
 +++ b/codex-rs/tui/src/chatwidget.rs
 @@ -41,6 +41,8 @@ use std::sync::atomic::Ordering;
@@ -76,7 +77,7 @@ index 15c9b32..83a27d2 100644
  use crate::app::app_server_requests::ResolvedAppServerRequest;
  use crate::app_command::AppCommand;
  use crate::app_event::HistoryLookupResponse;
-@@ -768,6 +770,8 @@ pub(crate) struct ChatWidget {
+@@ -777,6 +779,8 @@ pub(crate) struct ChatWidget {
      status_line_workspace_headline_last_requested_at: Option<Instant>,
      // Set after the backend reports the workspace-message feature gate is disabled.
      status_line_workspace_messages_disabled: bool,
@@ -85,7 +86,7 @@ index 15c9b32..83a27d2 100644
      // Cached backend-estimated cost and bounded refresh state for the current thread.
      thread_usage: thread_usage::ThreadUsageState,
      // Current thread-goal status shown in the status line when plan mode is inactive.
-@@ -1210,6 +1214,7 @@ impl ChatWidget {
+@@ -1220,6 +1224,7 @@ impl ChatWidget {
              self.refresh_terminal_title();
          }
          self.refresh_status_line_if_workspace_headline_due();
@@ -94,10 +95,10 @@ index 15c9b32..83a27d2 100644
      }
  
 diff --git a/codex-rs/tui/src/chatwidget/constructor.rs b/codex-rs/tui/src/chatwidget/constructor.rs
-index 0fde03a..c4c0efe 100644
+index a1079ac..69eaeae 100644
 --- a/codex-rs/tui/src/chatwidget/constructor.rs
 +++ b/codex-rs/tui/src/chatwidget/constructor.rs
-@@ -248,6 +248,7 @@ impl ChatWidget {
+@@ -253,6 +253,7 @@ impl ChatWidget {
              next_status_line_workspace_headline_request_id: 0,
              status_line_workspace_headline_last_requested_at: None,
              status_line_workspace_messages_disabled: false,
@@ -106,28 +107,20 @@ index 0fde03a..c4c0efe 100644
              current_goal_status_indicator: None,
              current_goal_status: None,
 diff --git a/codex-rs/tui/src/chatwidget/status_surfaces.rs b/codex-rs/tui/src/chatwidget/status_surfaces.rs
-index 8f37252..2e53fc1 100644
+index e79c0d3..7ac9206 100644
 --- a/codex-rs/tui/src/chatwidget/status_surfaces.rs
 +++ b/codex-rs/tui/src/chatwidget/status_surfaces.rs
-@@ -40,6 +40,17 @@ const TERMINAL_TITLE_ACTION_REQUIRED_INTERVAL: Duration = Duration::from_secs(1)
- const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX: &str = "[ ! ] Action Required";
- const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX_HIDDEN: &str = "[ . ] Action Required";
+@@ -22,6 +22,9 @@ use codex_utils_sandbox_summary::summarize_permission_profile;
  
-+const STATUS_LINE_COMMAND_REFRESH_INTERVAL: Duration = Duration::from_secs(4);
-+const STATUS_LINE_COMMAND_TIMEOUT: Duration = Duration::from_secs(6);
+ use super::status_state::TerminalTitleStatusKind;
+ 
++mod status_line_command;
++pub(super) use status_line_command::StatusLineCommandState;
 +
-+#[derive(Default)]
-+pub(super) struct StatusLineCommandState {
-+    output: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-+    pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
-+    last_requested_at: Option<Instant>,
-+    last_snapshot: Option<String>,
-+}
-+
- #[derive(Debug)]
- /// Parsed status-surface configuration for one refresh pass.
- ///
-@@ -190,6 +201,15 @@ impl ChatWidget {
+ /// Items shown in the terminal title when the user has not configured a
+ /// custom selection. Intentionally minimal: activity indicator + project name.
+ pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["activity", "project-name"];
+@@ -190,6 +193,15 @@ impl ChatWidget {
              self.request_status_line_workspace_headline_if_due(Instant::now());
          }
  
@@ -143,11 +136,42 @@ index 8f37252..2e53fc1 100644
          if selections.uses_thread_usage() {
              self.ensure_thread_usage_requested();
          } else {
-@@ -618,6 +638,103 @@ impl ChatWidget {
-             })
+@@ -786,6 +798,12 @@ impl ChatWidget {
+             ),
+             StatusLineItem::WorkspaceHeadline => self.status_line_workspace_headline.clone(),
+             StatusLineItem::TaskProgress => self.terminal_title_task_progress(),
++            StatusLineItem::Custom => self
++                .status_line_command
++                .output
++                .lock()
++                .ok()
++                .and_then(|output| output.clone()),
+         }
      }
  
-+    fn request_status_line_command_if_due(&mut self, now: Instant) {
+diff --git a/codex-rs/tui/src/chatwidget/status_surfaces/status_line_command.rs b/codex-rs/tui/src/chatwidget/status_surfaces/status_line_command.rs
+new file mode 100644
+index 0000000..dd5a03e
+--- /dev/null
++++ b/codex-rs/tui/src/chatwidget/status_surfaces/status_line_command.rs
+@@ -0,0 +1,146 @@
++//! External status-line command execution and cached output.
++
++use super::*;
++
++const REFRESH_INTERVAL: Duration = Duration::from_secs(4);
++const TIMEOUT: Duration = Duration::from_secs(6);
++
++#[derive(Default)]
++pub(in crate::chatwidget) struct StatusLineCommandState {
++    pub(super) output: std::sync::Arc<std::sync::Mutex<Option<String>>>,
++    pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
++    last_requested_at: Option<Instant>,
++    last_snapshot: Option<String>,
++}
++
++impl ChatWidget {
++    pub(super) fn request_status_line_command_if_due(&mut self, now: Instant) {
 +        use std::sync::atomic::Ordering;
 +
 +        if !self
@@ -163,9 +187,7 @@ index 8f37252..2e53fc1 100644
 +        let elapsed = self
 +            .status_line_command
 +            .last_requested_at
-+            .is_none_or(|last| {
-+                now.saturating_duration_since(last) >= STATUS_LINE_COMMAND_REFRESH_INTERVAL
-+            });
++            .is_none_or(|last| now.saturating_duration_since(last) >= REFRESH_INTERVAL);
 +        if (!changed && !elapsed)
 +            || self
 +                .status_line_command
@@ -177,8 +199,7 @@ index 8f37252..2e53fc1 100644
 +
 +        self.status_line_command.last_snapshot = Some(snapshot.clone());
 +        self.status_line_command.last_requested_at = Some(now);
-+        self.frame_requester
-+            .schedule_frame_in(STATUS_LINE_COMMAND_REFRESH_INTERVAL);
++        self.frame_requester.schedule_frame_in(REFRESH_INTERVAL);
 +
 +        let output = self.status_line_command.output.clone();
 +        let pending = self.status_line_command.pending.clone();
@@ -202,7 +223,7 @@ index 8f37252..2e53fc1 100644
 +        });
 +    }
 +
-+    pub(super) fn refresh_status_line_if_command_due(&mut self) {
++    pub(in crate::chatwidget) fn refresh_status_line_if_command_due(&mut self) {
 +        self.request_status_line_command_if_due(Instant::now());
 +    }
 +
@@ -241,23 +262,8 @@ index 8f37252..2e53fc1 100644
 +                "five_hour": window(limits.and_then(five_hour_status_window)),
 +                "weekly": window(limits.and_then(weekly_status_window)),
 +            },
-+        }).to_string()
-+    }
-+
-     pub(super) fn refresh_status_line_if_workspace_headline_due(&mut self) {
-         let now = Instant::now();
-         if self.status_line_workspace_headline_should_fetch(now)
-@@ -791,7 +908,48 @@ impl ChatWidget {
-             ),
-             StatusLineItem::WorkspaceHeadline => self.status_line_workspace_headline.clone(),
-             StatusLineItem::TaskProgress => self.terminal_title_task_progress(),
-+            StatusLineItem::Custom => self
-+                .status_line_command
-+                .output
-+                .lock()
-+                .ok()
-+                .and_then(|output| output.clone()),
-+        }
++        })
++        .to_string()
 +    }
 +
 +    async fn run_status_line_command(
@@ -280,20 +286,18 @@ index 8f37252..2e53fc1 100644
 +                .await
 +                .map_err(|error| error.to_string())?;
 +        }
-+        let result = tokio::time::timeout(STATUS_LINE_COMMAND_TIMEOUT, child.wait_with_output())
++        let result = tokio::time::timeout(TIMEOUT, child.wait_with_output())
 +            .await
 +            .map_err(|_| "status-line command timed out".to_string())?
 +            .map_err(|error| error.to_string())?;
 +        if !result.status.success() {
 +            return Err(format!("status-line command exited with {}", result.status));
-         }
++        }
 +        Ok(String::from_utf8_lossy(&result.stdout)
 +            .lines()
 +            .next()
 +            .map(str::trim_end)
 +            .filter(|line| !line.is_empty())
 +            .map(str::to_string))
-     }
- 
-     fn status_line_pull_request_url(&self) -> Option<String> {
-
++    }
++}

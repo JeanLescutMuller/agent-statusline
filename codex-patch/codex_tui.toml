@@ -1,7 +1,3 @@
 [tui]
 status_line = ["custom"]
 status_line_use_colors = true
-
-[tui.status_line_command]
-command = ["bash", "__HOME__/.codex/statusline-command.sh"]
-refresh_interval = 4

@@ -18,19 +18,26 @@ root/sudo assumed anywhere, aside from Codex's own install).
 bash install.sh
 ```
 
-Idempotent: safe to re-run any time. It deploys the shared library and
-provider adapters, migrates in-place from a legacy
-`~/opt/bootstrap-home/statusline` runtime and (once) from a standalone
-`agent-quota-tracker` install, deploys the quota pollers and their
-LaunchAgent, and - only if `codex` is on `PATH` - builds/deploys the
-status-line-command patch and wires `~/.codex/config.toml`. Requires
-`python3` on `PATH`.
+Idempotent: safe to re-run any time against a machine that already has
+agent-statusline installed. It deploys the shared library and provider
+adapters, deploys the quota pollers and their LaunchAgent, and - only if
+`codex` is on `PATH` - builds/deploys the status-line-command patch and
+wires `~/.codex/config.toml`. Requires `python3` on `PATH`.
+
+`install.sh` assumes a bare machine and carries no legacy-layout migration
+logic. To move to an incompatible on-disk layout (or just start clean), run:
+
+```bash
+bash uninstall.sh   # removes what install.sh deploys; preserves data/ and
+                     # codex-patch/; flags anything else left over
+bash install.sh      # fresh install
+```
 
 ## Architecture
 
 Four independent mandates share this repo:
 
-- **Statusline architecture** — `lib/` + `providers/`, deployed by `install.sh`
+- **Statusline architecture** — `src/statusline/` + `providers/`, deployed by `install.sh`
   and invoked on every render by Claude Code / Codex. This is the runtime
   path: shared cache, formatting, and per-provider adapters.
 - **Quota polling** — `src/quota_polling/`, the LaunchAgent-scheduled
@@ -66,8 +73,8 @@ flowchart TB
     provcodex["providers/codex-statusline-command.sh
     one process per render (~4s), same script for every session"]
 
-    sharedlib[["lib/statusline-cache.sh
-    lib/statusline-format.sh"]]
+    sharedlib[["src/statusline/cache.sh
+    src/statusline/format.sh"]]
 
     subgraph state["~/opt/agent-statusline/state/ — shared cache files"]
         direction LR
@@ -81,9 +88,9 @@ flowchart TB
         shared by both providers")]
     end
 
-    pushscript["lib/statusline-push-claude-quota.sh
+    pushscript["src/statusline/push-claude-quota.sh
     runs when stdin has rate_limits, no network call"]
-    refreshscript["lib/statusline-refresh-claude-quota.sh
+    refreshscript["src/statusline/refresh-claude-quota.sh
     fallback: no rate_limits yet this session"]
 
     claudelog[("data/claude-quota-history.jsonl
@@ -151,18 +158,18 @@ for why each writer exists.
 Deploys shared code and state under `~/opt/agent-statusline/`:
 
     ~/opt/agent-statusline/
-    ├── lib/
-    │   ├── statusline-cache.sh           shared lazy-cache primitives (stale-while-revalidate, locking)
-    │   ├── statusline-format.sh          shared ANSI styling and segment formatting
-    │   ├── statusline-push-claude-quota.sh     pushes live rate_limits to the claude quota log
-    │   ├── statusline-refresh-claude-quota.sh  fallback: reads the claude quota log
-    │   ├── statusline-refresh-git-local.sh     branch/untracked/unstaged/staged/conflicts
-    │   ├── statusline-refresh-git-remote.sh    ahead/behind
-    │   └── statusline-refresh-metrics.sh       used/total/percent memory
     ├── src/
+    │   ├── statusline/
+    │   │   ├── cache.sh           shared lazy-cache primitives (stale-while-revalidate, locking)
+    │   │   ├── format.sh          shared ANSI styling and segment formatting
+    │   │   ├── push-claude-quota.sh     pushes live rate_limits to the claude quota log
+    │   │   ├── refresh-claude-quota.sh  fallback: reads the claude quota log
+    │   │   ├── refresh-git-local.sh     branch/untracked/unstaged/staged/conflicts
+    │   │   ├── refresh-git-remote.sh    ahead/behind
+    │   │   └── refresh-metrics.sh       used/total/percent memory
     │   └── quota_polling/                deployed poll_claude.py, poll_codex.py, poll_all.py
     ├── adhoc_quotas_analysis/
-    │   ├── split_quota_log.py            one-time migration, run automatically by install.sh
+    │   ├── split_quota_log.py            one-time migration, run by hand only if you still have an old combined data/quota-log.jsonl
     │   ├── recompute_token_events.py     not scheduled, run by hand
     │   ├── recompute_codex_events.py     not scheduled, run by hand
     │   ├── claude-token-events.jsonl     recomputed Claude token-usage detail
@@ -257,7 +264,7 @@ because the underlying data has genuinely different persistence properties:
 | File | `source` | Writer | Cadence | Why it exists |
 |---|---|---|---|---|
 | `claude-quota-history.jsonl` | `claude` | `src/quota_polling/poll_claude.py` (LaunchAgent, `GET /api/oauth/usage`) | ~60s while a statusline is live, ~5min idle | That endpoint has no history - a missed reading is permanently lost. Unreliable (~21% 429 rate historically; can lock out for 3+ days - see `adhoc_quotas_analysis/AGENTS.md`). |
-| `claude-quota-history.jsonl` | `claude_statusline` | `lib/statusline-push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
+| `claude-quota-history.jsonl` | `claude_statusline` | `src/statusline/push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
 | `codex-quota-history.jsonl` | `codex` | `src/quota_polling/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`heartbeat/codex`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
 
 Every `claude`/`codex` row also feeds `analysis.ipynb`'s research into what
@@ -282,12 +289,15 @@ project needs, on the supported pinned version. Everything for this lives in
 above. `install.sh` calls `codex-patch/install-codex-statusline-patch.sh`,
 which:
 
-- Clones `openai/codex` at the pinned commit for the installed Codex version
-  (currently only 0.150.1 is supported; other versions are left unpatched).
-- Applies `codex-patch/patches/codex-<version>-status-line-command.patch`.
-- Builds a release binary with Cargo and deploys it as a
-  `~/.codex/packages/standalone/releases/...` release, symlinked from
-  `current`.
+- Clones `openai/codex` at the exact release commit allowlisted in
+  `codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.153.0;
+  unknown versions are left unpatched).
+- Checks and applies the shared
+  `codex-patch/patches/codex-status-line-command.patch`; almost all custom Rust
+  lives in one isolated module to keep upstream integration points small.
+- Builds a release binary with Cargo, pairs it with the matching official
+  `codex-code-mode-host`, and deploys both as a
+  `~/.codex/packages/standalone/releases/...` release, symlinked from `current`.
 - Is idempotent: skips the clone/build entirely once the deployed binary's
   marker matches the pinned commit + patch hash.
 
@@ -295,39 +305,46 @@ Verbose clone/patch/compiler output is captured in
 `~/opt/agent-statusline/codex-patch/build.log`, never streamed to the
 terminal - only milestones and the final result print.
 
-`install.sh` then owns just the `[tui]` status-line keys (`status_line`,
-`status_line_use_colors`, `status_line_command`) in `~/.codex/config.toml`,
-merging in `codex-patch/codex_tui.toml` via a `python3`/`tomllib` merge that
-touches nothing else in that file.
+`install.sh` then runs `codex-patch/merge_codex_config.py`, which owns just the
+`[tui]` keys `status_line` and `status_line_use_colors` in
+`~/.codex/config.toml`, merging in `codex-patch/codex_tui.toml` via `tomllib`
+and touching nothing else in that file. It also removes the obsolete
+`[tui.status_line_command]` table written by older installers; the patched
+binary reads `CODEX_STATUS_LINE_COMMAND` or falls back to
+`~/.codex/statusline-command.sh`.
 
 ## Source files
 
 Statusline architecture (runs on every render):
 
-- `lib/statusline-cache.sh`: paths, freshness, locking, timeouts, and atomic writes.
-- `lib/statusline-format.sh`: shared colors, bars, limits, and Git formatting.
-- `lib/statusline-refresh-*.sh`: one bounded refresh attempt, without cache policy.
-- `lib/statusline-refresh-claude-quota.sh`: reads the latest `claude` poll reading from the Claude quota log - fallback path only, see "Quota tracking".
-- `lib/statusline-push-claude-quota.sh`: appends a `claude_statusline` row to the Claude quota log from live stdin `rate_limits` - the primary path.
+- `src/statusline/cache.sh`: paths, freshness, locking, timeouts, and atomic writes.
+- `src/statusline/format.sh`: shared colors, bars, limits, and Git formatting.
+- `src/statusline/refresh-*.sh`: one bounded refresh attempt, without cache policy.
+- `src/statusline/refresh-claude-quota.sh`: reads the latest `claude` poll reading from the Claude quota log - fallback path only, see "Quota tracking".
+- `src/statusline/push-claude-quota.sh`: appends a `claude_statusline` row to the Claude quota log from live stdin `rate_limits` - the primary path.
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout.
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
-- `install.sh` + `utils.sh`: deployment, legacy-runtime migration, quota-poller/LaunchAgent deployment, and Codex config wiring.
+- `install.sh` + `utils.sh`: deployment, quota-poller/LaunchAgent deployment, and Codex config wiring - assumes a bare machine, no migration logic.
+- `uninstall.sh`: removes everything `install.sh` deploys; preserves `data/` and `codex-patch/`; flags anything else left over as an orphan.
 
 Quota polling (see "Quota tracking" above; deployed, LaunchAgent-scheduled, unattended):
 
 - `src/quota_polling/poll_claude.py` / `src/quota_polling/poll_codex.py` / `src/quota_polling/poll_all.py`: the LaunchAgent-scheduled pollers.
+- `src/quota_polling/com.jeanlescut.agent-statusline.plist.template`: `__PYTHON3__`/`__RUNTIME__` placeholders, filled in by `install.sh` (`sed`) at install time and written to `~/opt/agent-statusline/`, symlinked from `~/Library/LaunchAgents/`.
 
 Quota research (see "Quota tracking" above; own deep-dive docs in `adhoc_quotas_analysis/AGENTS.md`; not scheduled, run by hand):
 
-- `adhoc_quotas_analysis/split_quota_log.py`: one-time, idempotent migration from the old combined `data/quota-log.jsonl` to the two per-provider files - run automatically by `install.sh`.
+- `adhoc_quotas_analysis/split_quota_log.py`: one-time, idempotent migration from the old combined `data/quota-log.jsonl` to the two per-provider files - run by hand only if you still have that old file.
 - `adhoc_quotas_analysis/recompute_token_events.py` / `adhoc_quotas_analysis/recompute_codex_events.py`: rebuilds `adhoc_quotas_analysis/claude-token-events.jsonl` / `codex-token-events.jsonl` from local transcripts.
 - `adhoc_quotas_analysis/analysis.ipynb`: the research notebook - what the quota percentages actually track.
 
 Codex patch (build-time, one-off; see "Codex status-line patch" above):
 
 - `codex-patch/install-codex-statusline-patch.sh`: clone/patch/build/deploy the binary.
-- `codex-patch/patches/`: one `.patch` per supported Codex version.
+- `codex-patch/supported-versions.tsv`: exact supported version/commit pairs.
+- `codex-patch/patches/`: the shared cross-version patch.
 - `codex-patch/codex_tui.toml`: template merged into `~/.codex/config.toml`'s `[tui]` table.
+- `codex-patch/merge_codex_config.py`: the merge logic, run by `install.sh`'s "codex config" step.
 
 ## Tests
 
@@ -342,7 +359,7 @@ for what's covered and, deliberately, what isn't (the real Codex `git clone`
 ## Offline testing
 
 Set `STATUSLINE_RUNTIME_DIR` to a temporary directory and `STATUSLINE_LIB_DIR`
-to this repository's `lib/` directory, then pipe a captured provider payload
+to this repository's `src/statusline/` directory, then pipe a captured provider payload
 into the corresponding renderer. The first render may refresh stale data;
 subsequent Codex renders should start only Bash and one payload `jq`. That
 `jq` also supplies the refresh epoch used for cache freshness and carousel
