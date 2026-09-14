@@ -21,8 +21,7 @@ agent-statusline/
 ├── providers/                    # statusline architecture: Claude/Codex payload adapters, call into src/statusline/
 ├── src/
 │   ├── statusline/                # statusline architecture: shared cache/format lib + refresh scripts
-│   │   ├── refresh-claude-quota.sh   # fallback: reads the claude quota log
-│   │   └── push-claude-quota.sh      # primary: pushes live rate_limits to the claude quota log
+│   │   └── push-claude-quota.sh      # appends to the claude quota log, and writes state/quota/claude directly (tag X)
 │   └── quota_polling/            # quota polling: LaunchAgent-scheduled, deployed, unattended production code
 │       ├── poll_claude.py / poll_codex.py       # per-provider pollers
 │       ├── poll_all.py                          # the actual LaunchAgent entry point, runs both as subprocesses
@@ -110,18 +109,43 @@ than merged into this one, the same way `codex-patch/`'s own conventions
 live in this file rather than README.md).
 
 The coupling between `src/quota_polling/`/`adhoc_quotas_analysis/` and
-`src/statusline/`/`providers/` is file-based, not a `source`/import — see
-README.md's "Architecture" section for exactly which scripts read/write
-`data/claude-quota-history.jsonl` and `data/codex-quota-history.jsonl`
-(split from a single combined `data/quota-log.jsonl` on 2026-08-31 — see
-`adhoc_quotas_analysis/AGENTS.md`'s "Naming history"). One thing worth
-stating plainly here since it's easy to get backwards:
-`src/statusline/push-claude-quota.sh` is the *primary* Claude
-quota path now (free, rides existing traffic, never rate-limited);
-`src/statusline/refresh-claude-quota.sh` +
-`src/quota_polling/poll_claude.py` are a *fallback* for the one gap the push
-path can't cover — a session that hasn't sent its first message yet, or a
-machine-wide idle stretch with no statusline rendering anywhere at all.
+`src/statusline/`/`providers/` is file-based, not a `source`/import, and
+runs through **two different kinds of file** that are easy to conflate:
+
+- `data/claude-quota-history.jsonl` / `data/codex-quota-history.jsonl` — one
+  file **per provider** (split from a single combined `data/quota-log.jsonl`
+  on 2026-08-31 — see `adhoc_quotas_analysis/AGENTS.md`'s "Naming history"),
+  *not* one file per writer. Within `claude-quota-history.jsonl` specifically,
+  two independent writers both append, disambiguated by a `source` field:
+  `src/quota_polling/poll_claude.py` (`source: "claude"`) and
+  `src/statusline/push-claude-quota.sh` (`source: "claude_statusline"`).
+  Append-only, unconditional, no dedup, no ordering guarantee across the two
+  writers — nothing reads this live any more (see below), it exists purely
+  as raw material for `adhoc_quotas_analysis/analysis.ipynb`'s research.
+- `state/quota/claude` / `state/quota/codex` — a single small file per
+  provider holding only the *latest known reading*, six FS-delimited fields
+  (`five_pct/five_reset/week_pct/week_reset/source/observed_at`, see
+  `src/statusline/cache.sh`'s `statusline_write_quota_if_newer` and its
+  Python mirror `src/quota_polling/_quota_common.py`'s
+  `write_state_if_newer`). This is what `providers/claude-statusline-command.sh`
+  actually reads for its fallback display. Both Claude writers -
+  `push-claude-quota.sh` (tag `X`) and `poll_claude.py` (tag `P`) - write to
+  it **directly**, each comparing its own reading's `observed_at` (when the
+  reading was actually true, never write/render time - see
+  `push-claude-quota.sh`'s own header comment for why that distinction
+  matters) against whatever's already there and only overwriting if newer.
+  Whichever producer has the genuinely freshest reading wins regardless of
+  write order, so a concurrent session's live push can refresh what a
+  brand-new idle session sees just as well as the poller can - no rescan of
+  the historical log involved (that rescan - `refresh-claude-quota.sh` - was
+  removed in this redesign; see git history if you need the old shape).
+
+One thing worth stating plainly since it's easy to get backwards:
+`src/statusline/push-claude-quota.sh` is the *primary* Claude quota path now
+(free, rides existing traffic, never rate-limited); `poll_claude.py` is a
+*fallback* for the one gap the push path can't cover — a session that
+hasn't sent its first message yet, or a machine-wide idle stretch with no
+statusline rendering anywhere at all.
 
 `providers/claude-statusline-command.sh` touches `state/heartbeat/claude`
 on every render specifically so `src/quota_polling/poll_claude.py` can tell a statusline

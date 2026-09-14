@@ -59,17 +59,36 @@ model_display="$model"
 [ -n "$effort" ] && model_display="$model ($effort)"
 
 quota_cache="$STATUSLINE_STATE_DIR/quota/claude"
-statusline_refresh_if_stale "$quota_cache" 60 claude-quota 5 2 "$now" \
-    bash "$lib_dir/refresh-claude-quota.sh"
-if [ ! -f "$quota_cache" ]; then
-    statusline_write_values_if_stale "$quota_cache" 60 claude-quota 8 "$now" \
-        "$five_pct" "$five_reset" "$week_pct" "$week_reset"
-fi
+# quota_source tags where the displayed five_pct/week_pct actually came from:
+#   L = live stdin rate_limits (this render, bypasses the state file entirely)
+#   P = src/quota_polling/poll_claude.py's real API poll (writes quota_cache directly)
+#   X = another render's live push (src/statusline/push-claude-quota.sh, this
+#       session's own or a concurrent one's - writes quota_cache directly)
+#   S = degenerate seed - see the write below
+#
+# Seed a placeholder into the shared state file with observed_at=0 - always
+# 0, deliberately never "$now": render time is always >= the push's own
+# transcript-derived observed_at for this exact same reading (a message is
+# always sent before the render that displays it), so using "$now" here
+# would make this render's own seed write silently outrank its own push's
+# X write every single time, permanently hiding the X tag - exactly the
+# "render/append time is a wrong freshness proxy" trap
+# push-claude-quota.sh's own comment warns about. observed_at=0 means this
+# only ever matters before the state file has held any real P/X reading -
+# once one exists, this is a guaranteed no-op (see
+# statusline_write_quota_if_newer's own header comment in cache.sh).
+statusline_write_quota_if_newer "$quota_cache" "$five_pct" "$five_reset" \
+    "$week_pct" "$week_reset" S 0
 # Live stdin values win whenever this render actually has rate_limits -
 # they're the freshest signal there is (see the push call above and
-# adhoc_quotas_analysis/AGENTS.md §6). The cache overlay is a fallback for the one case
-# stdin can't cover: a session that hasn't sent its first message yet.
-[ "$has_rate_limits" != "true" ] && statusline_overlay_quota_cache "$quota_cache"
+# adhoc_quotas_analysis/AGENTS.md §6). The state-file overlay is a fallback
+# for the one case stdin can't cover: a session that hasn't sent its first
+# message yet.
+if [ "$has_rate_limits" = "true" ]; then
+    quota_source="L"
+else
+    statusline_overlay_quota_cache "$quota_cache"
+fi
 
 statusline_common_segments
 

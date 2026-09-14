@@ -81,7 +81,7 @@ flowchart TB
         hbC[("heartbeat/claude")]
         hbX[("heartbeat/codex")]
         ccC[("quota/claude
-        60s fallback cache")]
+        latest reading only, tagged P/X/S")]
         ccX[("quota/codex
         60s cache")]
         ccOther[("system/metrics, git/&lt;cwd&gt;/*, static/*
@@ -90,11 +90,9 @@ flowchart TB
 
     pushscript["src/statusline/push-claude-quota.sh
     runs when stdin has rate_limits, no network call"]
-    refreshscript["src/statusline/refresh-claude-quota.sh
-    fallback: no rate_limits yet this session"]
 
     claudelog[("data/claude-quota-history.jsonl
-    2 sources: claude / claude_statusline")]
+    append-only history, 2 sources: claude / claude_statusline")]
     codexlog[("data/codex-quota-history.jsonl
     1 source: codex")]
 
@@ -123,10 +121,10 @@ flowchart TB
     provcodex -->|touches every render| hbX
 
     provclaude -->|"rate_limits on stdin"| pushscript
-    pushscript -->|appends| claudelog
-    provclaude -.->|"no rate_limits yet"| refreshscript
-    refreshscript -.->|reads latest claude row| claudelog
-    provclaude -.->|read/write| ccC
+    pushscript -->|"appends, unconditionally"| claudelog
+    pushscript -->|"writes if newer, tag X"| ccC
+    provclaude -->|"seeds if newer, tag S"| ccC
+    provclaude -.->|"no rate_limits yet: reads"| ccC
 
     provcodex -->|writes payload snapshot| ccX
 
@@ -135,6 +133,7 @@ flowchart TB
     pollclaude -.->|checks freshness| hbC
     pollclaude -->|"~60s watched, ~5min idle"| anthropicusage
     pollclaude -->|appends| claudelog
+    pollclaude -->|"writes if newer, tag P"| ccC
     pollcodex -.->|checks freshness| hbX
     pollcodex -->|"~60s watched, ~5min idle"| codexrpc
     pollcodex -->|appends| codexlog
@@ -149,9 +148,19 @@ traffic) and the fixed-cadence poll (`claude`, this account's only caller of
 that endpoint). `codex-quota-history.jsonl` has a single writer,
 `poll_codex.py` — Codex has no equivalent free per-render push (see "Quota
 tracking" below for why). The coupling between the render path and the poll
-path is entirely file-based — a heartbeat file and a per-provider log —
-never a direct script call in either direction; see "Quota tracking" below
-for why each writer exists.
+path is entirely file-based — a heartbeat file, a per-provider history log,
+and a per-provider "latest reading" state file — never a direct script call
+in either direction; see "Quota tracking" below for why each writer exists.
+
+The two Claude writers feed `state/quota/claude` directly, not just the
+history log: both compare the reading's own `observed_at` (when it was
+actually true, not write/render time) against whatever's already in the
+state file and only overwrite if newer, so whichever producer has the
+genuinely freshest reading wins regardless of write order - a concurrent
+session's live push can refresh a brand-new idle session's fallback display
+just as well as the poller can. See `AGENTS.md`'s "Quota tracking" section
+for the full mechanism and why an earlier design (rescanning the history log
+at read time) didn't hold up.
 
 ## Runtime layout
 
@@ -167,8 +176,7 @@ even though it reads/writes this same runtime's `data/`:
     │   ├── statusline/
     │   │   ├── cache.sh           shared lazy-cache primitives (stale-while-revalidate, locking)
     │   │   ├── format.sh          shared ANSI styling and segment formatting
-    │   │   ├── push-claude-quota.sh     pushes live rate_limits to the claude quota log
-    │   │   ├── refresh-claude-quota.sh  fallback: reads the claude quota log
+    │   │   ├── push-claude-quota.sh     appends to the claude quota log, writes state/quota/claude directly (tag X)
     │   │   ├── refresh-git-local.sh     branch/untracked/unstaged/staged/conflicts
     │   │   ├── refresh-git-remote.sh    ahead/behind
     │   │   └── refresh-metrics.sh       used/total/percent memory
@@ -186,7 +194,7 @@ even though it reads/writes this same runtime's `data/`:
     │   │   ├── claude                    epoch of the last Claude render (see below)
     │   │   └── codex                     epoch of the last Codex render (see below)
     │   ├── quota/
-    │   │   ├── claude                    5h percent/reset, 7d percent/reset
+    │   │   ├── claude                    latest reading only: 5h/7d percent+reset, source tag (P/X/S), observed_at
     │   │   └── codex                     5h percent/reset, 7d percent/reset
     │   └── git/cwd/.../
     │       ├── local                     local Git snapshot for that cwd
@@ -227,21 +235,22 @@ hot-path logger independent of another `date` subprocess.
 |---|---|---:|---:|
 | Hostname/color | machine | static | none |
 | Memory | machine | 30s | 1s |
-| Claude quotas | Claude account | 60s | 2s |
 | Codex quotas | Codex account | 60s | payload update |
 | Local Git | exact cwd | 8s | 1s |
 | Remote Git | exact cwd | 30s | 1s |
 
-Claude quotas mostly skip this cache entirely: `providers/claude-statusline-command.sh`
-prefers the live `rate_limits` values already present on every render's stdin
-payload — no cache, no staleness, since it's exactly as fresh as Claude
-Code's own in-memory quota state. The 60s-TTL cache above is a fallback for
-the one case stdin can't cover (a session that hasn't sent its first message
-yet), reading the latest reading from the Claude quota log
-(`~/opt/agent-statusline/data/claude-quota-history.jsonl`) instead of fetching
-Anthropic's OAuth usage endpoint directly — see "Quota tracking" below for
-why. Soft-fails closed if that log doesn't exist yet, same as any other
-failed refresh.
+Claude quotas aren't in this table because they don't go through the lazy
+stale-while-revalidate machinery above at all - they're a different, simpler
+mechanism. `providers/claude-statusline-command.sh` prefers the live
+`rate_limits` values already present on every render's stdin payload (no
+cache, no staleness, exactly as fresh as Claude Code's own in-memory quota
+state). For the one case stdin can't cover - a session that hasn't sent its
+first message yet - it falls back to `state/quota/claude`, a single small
+file holding only the latest known reading, kept fresh by direct writes
+(not a scheduled refresh): both `src/statusline/push-claude-quota.sh` and
+`src/quota_polling/poll_claude.py` write to it on every push/poll,
+comparing the reading's own `observed_at` against what's already there and
+writing only if newer - see "Quota tracking" below for the full mechanism.
 
 Codex contributes its latest payload snapshot to the shared provider cache
 because no separate stable local quota endpoint has been established -
@@ -276,9 +285,39 @@ than the poll rows and don't carry the full raw API response.
 
 Concurrent writers append safely with no locking: every append is one
 `write()` call under 4KB with the file opened `O_APPEND`, which POSIX
-guarantees is atomic across processes. See `adhoc_quotas_analysis/AGENTS.md` for the full
-investigation, findings, and gotchas - it's the single deepest document in
-this repo and deliberately kept separate from this README.
+guarantees is atomic across processes. These two files are pure history now
+- nothing reads them at render time - so there's also no dedup or ordering
+guarantee between the two Claude writers: each just appends unconditionally
+whenever it has a genuine reading, `source` disambiguates them, and
+`adhoc_quotas_analysis/analysis.ipynb` is free to reconcile ordering itself
+at analysis time if it ever needs to.
+
+### The "latest known quota" state file
+
+What a brand-new Claude session actually reads for its fallback display -
+`state/quota/claude` (see "Lazy stale-while-revalidate flow" above) - is a
+*different* file from the two history logs, and deliberately not derived
+from them by rescanning at read time (an earlier design did exactly that,
+and broke under real load: the poll reading only lands a few times a day at
+most, and got crowded out of even a generous tail window by the far more
+frequent pushes). Instead, both Claude writers push straight to this one
+small file, whichever has the fresher reading wins:
+
+| Writer | Tag | Compares |
+|---|---|---|
+| `src/statusline/push-claude-quota.sh` | `X` | this push's `observed_at` (transcript-derived) |
+| `src/quota_polling/poll_claude.py` | `P` | the poll's own `ts` (a live API call, so poll time ≈ observation time) |
+| `providers/claude-statusline-command.sh` (seed) | `S` | always `observed_at=0` - see its own comment for why it can never use "now": render time is always ≥ the same render's push's real `observed_at`, so a seed using "now" would silently outrank its own push's `X` tag every time |
+
+Both real writers call the same compare-then-atomically-overwrite primitive
+- `statusline_write_quota_if_newer` in `src/statusline/cache.sh` (bash side)
+and `write_state_if_newer` in `src/quota_polling/_quota_common.py` (Python
+side, same six-field format) - no locking, since a same-instant write race
+only risks a slightly-less-fresh value for one render until the next write
+(from either side) self-corrects. The statusline displays whichever tag
+ends up in the file next to the percentage (`65% (P)`), so which mechanism
+actually produced a given reading is visible at a glance while reading the
+live statusline, not just from the source.
 
 ## Codex status-line patch
 
@@ -319,8 +358,7 @@ Statusline architecture (runs on every render):
 - `src/statusline/cache.sh`: paths, freshness, locking, timeouts, and atomic writes.
 - `src/statusline/format.sh`: shared colors, bars, limits, and Git formatting.
 - `src/statusline/refresh-*.sh`: one bounded refresh attempt, without cache policy.
-- `src/statusline/refresh-claude-quota.sh`: reads the latest `claude` poll reading from the Claude quota log - fallback path only, see "Quota tracking".
-- `src/statusline/push-claude-quota.sh`: appends a `claude_statusline` row to the Claude quota log from live stdin `rate_limits` - the primary path.
+- `src/statusline/push-claude-quota.sh`: appends a `claude_statusline` row to the Claude quota log, and writes `state/quota/claude` directly (tag `X`) from live stdin `rate_limits` - the primary path, see "The 'latest known quota' state file".
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout.
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
 - `install.sh` + `utils.sh`: deployment, quota-poller/LaunchAgent deployment, and Codex config wiring - assumes a bare machine, no migration logic.

@@ -1,16 +1,20 @@
 #!/bin/bash
 # End-to-end tests for src/statusline/push-claude-quota.sh - the free path
-# that appends a claude_statusline row to the shared quota log from the
-# statusline's own stdin rate_limits, instead of waiting on
-# src/quota_polling/poll_claude.py's network poll. See the script's own header comment
-# and adhoc_quotas_analysis/AGENTS.md's "GET /api/oauth/usage 429s" investigation for why.
+# that (1) appends a claude_statusline row to the shared history log from
+# the statusline's own stdin rate_limits, and (2) updates the shared
+# "latest known quota" state file (tagged X), instead of waiting on
+# src/quota_polling/poll_claude.py's network poll. See the script's own
+# header comment and adhoc_quotas_analysis/AGENTS.md's "GET /api/oauth/usage
+# 429s" investigation for why the free path exists at all.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
 PUSH="$REPO_ROOT/src/statusline/push-claude-quota.sh"
+SEP=$'\034'
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-pushhome.XXXXXX")"
 trap 'rm -rf "$TH_HOME"' EXIT
 LOG="$TH_HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
+STATE="$TH_HOME/opt/agent-statusline/state/quota/claude"
 TRANSCRIPT="$TH_HOME/transcript.jsonl"
 
 write_log() { mkdir -p "$(dirname "$LOG")"; printf '%s\n' "$1" > "$LOG"; }
@@ -31,6 +35,7 @@ rm -f "$LOG"
 run_push "" 42 "2026-01-01T00:00:00Z" 55 "2026-01-05T00:00:00Z"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_file_missing "nothing logged" "$LOG"
+assert_file_missing "state file untouched" "$STATE"
 
 section "transcript path doesn't exist -> no-op"
 run_push "$TH_HOME/nope.jsonl" 42 "" 55 ""
@@ -42,8 +47,9 @@ write_transcript '{"type":"summary","leafUuid":"x"}'
 run_push "$TRANSCRIPT" 42 "" 55 ""
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_file_missing "nothing logged" "$LOG"
+assert_file_missing "state file untouched" "$STATE"
 
-section "first genuine reading -> appends one row"
+section "first genuine reading -> appends one row and writes the state file"
 write_transcript "$(cat <<'EOF'
 {"type":"user","timestamp":"2026-01-01T10:00:00.000Z"}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05.500Z"}
@@ -60,42 +66,47 @@ assert_contains "carries the seven-day percent" "$row" '"seven_day_pct":55'
 assert_contains "carries the five-hour reset" "$row" '"five_hour_resets_at":"2026-01-01T15:00:00Z"'
 assert_contains "observed_at is the transcript's last timestamp, not append time" \
     "$row" '"observed_at":1767261605'
+assert_file_exists "state file written" "$STATE"
+IFS="$SEP" read -r st_five st_five_reset st_week st_week_reset st_source st_observed < "$STATE"
+assert_eq "state 5h percent" "42" "$st_five"
+assert_eq "state 5h reset" "2026-01-01T15:00:00Z" "$st_five_reset"
+assert_eq "state 7d percent" "55" "$st_week"
+assert_eq "state 7d reset" "2026-01-08T00:00:00Z" "$st_week_reset"
+assert_eq "state tagged X (push)" "X" "$st_source"
+assert_eq "state observed_at matches the log row" "1767261605" "$st_observed"
 
-section "same transcript again -> no new row (observed_at not newer)"
+section "same transcript again -> the log has no dedup any more, appends regardless"
 run_push "$TRANSCRIPT" 42 "2026-01-01T15:00:00Z" 55 "2026-01-08T00:00:00Z"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_eq "still exactly one row" "1" "$(row_count)"
+assert_eq "a second, duplicate-looking row is appended" "2" "$(row_count)"
 
-section "a genuinely newer transcript entry -> appends a second row"
+section "a genuinely newer transcript entry -> appends a third row"
 cat >> "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","timestamp":"2026-01-01T10:05:00.000Z"}
 EOF
 run_push "$TRANSCRIPT" 43 "2026-01-01T15:00:00Z" 55 "2026-01-08T00:00:00Z"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_eq "two rows now" "2" "$(row_count)"
+assert_eq "three rows now" "3" "$(row_count)"
+IFS="$SEP" read -r st_five _ _ _ _ st_observed < "$STATE"
+assert_eq "state file picks up the newer 5h percent" "43" "$st_five"
+assert_eq "state file's observed_at advances too" "1767261900" "$st_observed"
+
+section "an older/equal observed_at does not regress the state file"
+run_push "$TRANSCRIPT" 99 "2026-01-01T15:00:00Z" 55 "2026-01-08T00:00:00Z"
+# Same transcript (same last timestamp, observed_at unchanged) but a
+# different five_pct - if the state file compared correctly it stays at 43,
+# not 99, even though the log itself still appends unconditionally.
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_eq "four rows in the log (still no dedup there)" "4" "$(row_count)"
+IFS="$SEP" read -r st_five _ _ _ _ _ < "$STATE"
+assert_eq "state file 5h percent unchanged (99 was not newer)" "43" "$st_five"
 
 section "empty resets_at fields become JSON null, not empty strings"
 write_transcript '{"type":"assistant","timestamp":"2026-02-01T00:00:00.000Z"}'
-rm -f "$LOG"
+rm -f "$LOG" "$STATE"
 run_push "$TRANSCRIPT" 10 "" 20 ""
 row="$(cat "$LOG")"
 assert_contains "five_hour_resets_at is null" "$row" '"five_hour_resets_at":null'
 assert_contains "seven_day_resets_at is null" "$row" '"seven_day_resets_at":null'
-
-section "intervening claude/codex poll rows don't confuse the per-source comparison"
-rm -f "$LOG"
-write_transcript '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}'
-run_push "$TRANSCRIPT" 10 "" 20 ""  # seeds one claude_statusline row
-cat >> "$LOG" <<'EOF'
-{"ts":1,"source":"claude","api":{}}
-{"ts":2,"source":"codex","codex_rate_limits":{}}
-EOF
-# Same transcript timestamp as the seed row - should still no-op despite the
-# two unrelated rows now sitting at the tail of the file (poll_claude.py hit
-# exactly this class of bug once: reading only the literal last line instead
-# of the last row from the same source - see adhoc_quotas_analysis/AGENTS.md).
-run_push "$TRANSCRIPT" 10 "" 20 ""
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_eq "still exactly 3 rows (seed + 2 unrelated), no duplicate push" "3" "$(row_count)"
 
 harness_summary

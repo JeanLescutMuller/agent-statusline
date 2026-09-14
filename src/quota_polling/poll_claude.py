@@ -45,6 +45,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.error
+from datetime import datetime
 from pathlib import Path
 
 import _quota_common
@@ -55,6 +56,13 @@ import _quota_common
 # src/data/ instead of the real sibling-of-src/ data/.
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 QUOTA_LOG_FILE = DATA_DIR / "claude-quota-history.jsonl"
+
+# Same runtime root as HEARTBEAT_FILE below - the shared "latest known
+# quota" state file src/statusline/providers read (see cache.sh's
+# statusline_overlay_quota_cache). Written here with source "P" via
+# _quota_common.write_state_if_newer, same format and same freshness rule
+# as src/statusline/push-claude-quota.sh's "X" writes to this same file.
+STATE_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "quota" / "claude"
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -157,6 +165,19 @@ def fetch_usage(token: str) -> tuple[dict | None, dict | None, dict | None]:
                             "detail": exc.msg}
 
 
+def _epoch(iso: str | None) -> str:
+    """Converts an ISO 8601 resets_at (fractional seconds and/or a bare
+    "Z" suffix, same formats the API sends) to an epoch-seconds string, or
+    "" if there's nothing to convert - mirrors the epoch filter the old
+    (now-removed) refresh-claude-quota.sh used to apply at read time."""
+    if not iso:
+        return ""
+    try:
+        return str(int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()))
+    except ValueError:
+        return ""
+
+
 def _last_log_row() -> dict | None:
     """The last logged row (any source, any outcome) - used only for the
     idle-cadence fallback below, which deliberately doesn't care which
@@ -225,6 +246,19 @@ def main() -> None:
     }
     with QUOTA_LOG_FILE.open("a") as f:
         f.write(json.dumps(d_record) + "\n")
+
+    if d_api is not None:
+        five_hour = d_api.get("five_hour") or {}
+        seven_day = d_api.get("seven_day") or {}
+        _quota_common.write_state_if_newer(
+            STATE_FILE,
+            round(five_hour.get("utilization") or 0),
+            _epoch(five_hour.get("resets_at")),
+            round(seven_day.get("utilization") or 0),
+            _epoch(seven_day.get("resets_at")),
+            "P",
+            d_record["ts"],
+        )
 
 
 if __name__ == "__main__":

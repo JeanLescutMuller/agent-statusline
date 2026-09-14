@@ -11,7 +11,7 @@ bash tests/test_format.sh  # one file at a time; each is independently runnable
 
 Every test is hermetic: real temp git repos, a real local bare "remote", and
 a temp `$HOME` - nothing here touches your actual `~/.claude`, `~/.codex`, or
-`~/opt/agent-quota-tracker`. `test_provider_codex.sh` is the slow one: the
+`~/opt/agent-statusline`. `test_provider_codex.sh` is the slow one: the
 Codex adapter's carousel page is chosen from the real wall clock (not the
 payload), so a few sections poll for real, bounded at 13s each, to observe
 pages 1/2/3 as they come up.
@@ -24,11 +24,11 @@ pages 1/2/3 as they come up.
   clauses (missing binary, unsupported version, missing patch file, and the
   important idempotent already-installed short-circuit) are covered in
   `test_codex_patch_guards.sh` without ever reaching that path.
-- Live Anthropic API calls or the real macOS Keychain - neither is reachable
-  from this repo any more. Claude quota now comes from a fixture
-  agent-quota-tracker log (`test_refresh_claude_quota.sh`); the real Keychain
-  read lives in agent-quota-tracker's own `poll_claude.py`, a separate
-  project with its own test story.
+- Live Anthropic API calls or the real macOS Keychain - `test_push_claude_quota.sh`
+  and `test_quota_common.sh` cover the quota write paths against fixture
+  transcripts/fixture state files instead; the real Keychain read and
+  network poll live in `src/quota_polling/poll_claude.py`'s `fetch_token`/
+  `fetch_usage`, untested here on purpose.
 
 ## Files
 
@@ -36,12 +36,13 @@ pages 1/2/3 as they come up.
 |---|---|
 | `harness.sh` | The assert helpers + fixture/isolation utilities every test file sources |
 | `test_format.sh` | `src/statusline/format.sh` - pure functions |
-| `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh/write, static read, log rotation |
+| `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh/write, quota state-file writer/overlay, static read, log rotation |
+| `test_quota_common.sh` | `src/quota_polling/_quota_common.py`'s `write_state_if_newer` - the Python-side mirror of `cache.sh`'s quota state-file writer, cross-checked for format agreement |
 | `test_refresh_git_local.sh` | `src/statusline/refresh-git-local.sh` against real temp repos |
 | `test_refresh_git_remote.sh` | `src/statusline/refresh-git-remote.sh` against a real local bare remote |
 | `test_refresh_metrics.sh` | `src/statusline/refresh-metrics.sh` on the real host |
-| `test_refresh_claude_quota.sh` | `src/statusline/refresh-claude-quota.sh` - reading a fixture agent-quota-tracker log, including the epoch-parsing filter's three timestamp formats |
-| `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end |
+| `test_push_claude_quota.sh` | `src/statusline/push-claude-quota.sh` - history-log append (now unconditional) and the `state/quota/claude` freshness-compared write (tag `X`) |
+| `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the P/X/S source-tag overlay chain |
 | `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |
 | `test_install.sh` | `install.sh` - idempotency, Codex-absent skip, the real TOML-merge heredoc |
 | `test_uninstall.sh` | `uninstall.sh` - full removal, `data/`/`codex-patch/` preserved, orphan reporting |

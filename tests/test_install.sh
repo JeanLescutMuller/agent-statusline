@@ -38,8 +38,8 @@ assert_file_missing "~/.codex/config.toml is not touched" "$th_home/.codex/confi
 
 section "deploys the shared lib and provider adapters"
 assert_file_exists "lib deployed under ~/opt/agent-statusline" "$th_home/opt/agent-statusline/src/statusline/cache.sh"
-assert_file_exists "Claude quota refresh script deployed as part of the shared lib" \
-    "$th_home/opt/agent-statusline/src/statusline/refresh-claude-quota.sh"
+assert_file_exists "Claude quota push script deployed as part of the shared lib" \
+    "$th_home/opt/agent-statusline/src/statusline/push-claude-quota.sh"
 assert_file_exists "Claude adapter deployed" "$th_home/.claude/statusline-command.sh"
 diff -q "$REPO_ROOT/src/statusline/cache.sh" "$th_home/opt/agent-statusline/src/statusline/cache.sh" >/dev/null
 assert_status "deployed lib matches the repo source" 0 $?

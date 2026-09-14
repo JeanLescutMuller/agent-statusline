@@ -46,15 +46,20 @@ statusline_bar 150 8 "$STATUSLINE_GREEN" out
 assert_eq "over 100% clamps to full width, not overflow" "████████" "$(strip_ansi "$out")"
 
 section "statusline_limit_segment"
-statusline_limit_segment 5h 42 "" 0 out
+statusline_limit_segment 5h 42 "" 0 "" out
 assert_contains "under 100%: shows a bar and the percent" "$out" "42%"
 assert_not_contains "under 100%: no Blocked text" "$out" "Blocked"
-statusline_limit_segment 7d 100 1700000600 1700000000 out
+assert_not_contains "no source given: no (tag) suffix" "$out" "("
+statusline_limit_segment 5h 42 "" 0 L out
+assert_contains "source given: percent carries the (tag)" "$out" "42% (L)"
+statusline_limit_segment 7d 100 1700000600 1700000000 "" out
 assert_contains "at 100% with numeric reset: Blocked" "$out" "Blocked"
 assert_contains "at 100% with numeric reset: shows remaining time" "$out" "resets in"
-statusline_limit_segment 7d 100 "tomorrow" 1700000000 out
+statusline_limit_segment 7d 100 1700000600 1700000000 P out
+assert_contains "at 100%, source given: (tag) still appears" "$out" "resets in 0h 10m (P)"
+statusline_limit_segment 7d 100 "tomorrow" 1700000000 "" out
 assert_contains "at 100% with non-numeric reset: shown verbatim" "$out" "resets tomorrow"
-statusline_limit_segment 7d 120 "" 0 out
+statusline_limit_segment 7d 120 "" 0 "" out
 assert_contains "over 100% with no reset info still renders a bar" "$out" "120%"
 
 section "statusline_context_segment"

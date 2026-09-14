@@ -3,14 +3,14 @@
 # README's "Offline testing" recipe: STATUSLINE_RUNTIME_DIR/STATUSLINE_LIB_DIR
 # point at an isolated temp runtime, and a captured payload is piped in.
 #
-# HOME is also overridden per call. The script hardcodes
-# $HOME/opt/agent-statusline/data/claude-quota-history.jsonl for its live quota
-# refresh (see src/statusline/refresh-claude-quota.sh - test_refresh_claude_quota.sh
-# covers that script directly) and $HOME/opt/bootstrap-home/bin/get_host_color
-# for the host color - pointing HOME at an empty temp dir makes both misses
-# deterministic (quota refresh fails closed to the payload's own numbers;
-# host color falls back to the default) instead of quietly depending on what's
-# installed on the machine running the suite.
+# HOME is also overridden per call. push-claude-quota.sh (invoked as a
+# subprocess whenever the payload has rate_limits - see
+# test_push_claude_quota.sh for that script's own tests) hardcodes
+# $HOME/opt/agent-statusline/data/claude-quota-history.jsonl, and
+# statusline_read_static falls back to $HOME/opt/bootstrap-home/bin/get_host_color
+# - pointing HOME at an empty temp dir makes both misses deterministic
+# instead of quietly depending on what's installed on the machine running
+# the suite.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -54,6 +54,8 @@ assert_contains "line 2 shows the session id" "$TH_OUT" "session-abc123"
 assert_contains "line 3 shows the context percentage" "$TH_OUT" "42%"
 assert_contains "line 3 shows the 5h percentage" "$TH_OUT" "55%"
 assert_contains "line 3 shows the 7d percentage" "$TH_OUT" "70%"
+assert_contains "5h is tagged live (L) - stdin had rate_limits" "$TH_OUT" "55% (L)"
+assert_contains "7d is tagged live (L) too" "$TH_OUT" "70% (L)"
 
 section "full payload outside a git repo"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
@@ -75,11 +77,29 @@ run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 quota_cache="$STATUSLINE_RUNTIME_DIR/state/quota/claude"
 assert_file_exists "first call seeds the quota cache from the payload" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "55"
+assert_contains "the seed write tags itself S (degenerate fallback, not a real poll)" \
+    "$(cat "$quota_cache")" "S"
 assert_file_exists "every render touches the liveness heartbeat src/quota_polling/poll_claude.py polls faster against" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
 
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_contains "a later call with no rate_limits in the payload still shows the cached 5h percent" "$TH_OUT" "55%"
 assert_contains "...and the cached 7d percent" "$TH_OUT" "70%"
+assert_contains "...tagged S, since that cache entry is the seed write above, not a poll" "$TH_OUT" "55% (S)"
+
+section "a session with a real transcript pushes X; a later idle session sees it via overlay"
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime3.XXXXXX")"
+transcript="$TH_HOME/transcript-x.jsonl"
+printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:00.000Z"}' > "$transcript"
+payload="$TH_TMP/payload-x.json"
+sed "s#__CWD__#$plain_dir#" "$FIXTURES/claude-payload.json" \
+    | jq --arg t "$transcript" '. + {transcript_path: $t}' > "$payload"
+
+run_claude "$payload" "$plain_dir"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "own render still shows live (L), push is a side effect" "$TH_OUT" "55% (L)"
+
+run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
+assert_contains "a later idle session's fallback sees the pushed value, tagged X" "$TH_OUT" "55% (X)"
 
 harness_summary

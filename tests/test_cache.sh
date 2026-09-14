@@ -189,6 +189,63 @@ assert_eq "writes the timestamp" "1000" "$(cat "${cf}.timestamp")"
 statusline_write_values_if_stale "$cf" 60 values-key 5 1010 x y z
 assert_eq "fresh cache: write is skipped, old values remain" "a${STATUSLINE_FIELD_SEPARATOR}b${STATUSLINE_FIELD_SEPARATOR}c" "$(cat "$cf")"
 
+section "statusline_write_quota_if_newer"
+th_tmp_runtime
+source "$REPO_ROOT/src/statusline/cache.sh"
+statusline_cache_init
+qc="$STATUSLINE_STATE_DIR/quota/claude"
+
+statusline_write_quota_if_newer "$qc" 42 1700000000 55 1700100000 P 500
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 v2 v3 v4 v5 v6 < "$qc"
+assert_eq "first write: 5h pct" "42" "$v1"
+assert_eq "first write: 5h reset" "1700000000" "$v2"
+assert_eq "first write: 7d pct" "55" "$v3"
+assert_eq "first write: 7d reset" "1700100000" "$v4"
+assert_eq "first write: source tag" "P" "$v5"
+assert_eq "first write: observed_at" "500" "$v6"
+
+statusline_write_quota_if_newer "$qc" 10 "" 20 "" X 400
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 _ _ _ v5 v6 < "$qc"
+assert_eq "an older observed_at does not overwrite" "42" "$v1"
+assert_eq "...source tag unchanged either" "P" "$v5"
+assert_eq "...observed_at unchanged" "500" "$v6"
+
+statusline_write_quota_if_newer "$qc" 10 "" 20 "" X 500
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 _ _ _ v5 _ < "$qc"
+assert_eq "an equal observed_at does not overwrite either (strictly newer only)" "42" "$v1"
+assert_eq "...source tag unchanged" "P" "$v5"
+
+statusline_write_quota_if_newer "$qc" 99 1700200000 88 1700300000 X 600
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 v2 v3 v4 v5 v6 < "$qc"
+assert_eq "a genuinely newer observed_at overwrites" "99" "$v1"
+assert_eq "...every field, not just the tag" "1700200000" "$v2"
+assert_eq "...source tag flips to the new writer" "X" "$v5"
+assert_eq "...observed_at advances" "600" "$v6"
+
+section "statusline_overlay_quota_cache"
+th_tmp_runtime
+source "$REPO_ROOT/src/statusline/cache.sh"
+statusline_cache_init
+qc="$STATUSLINE_STATE_DIR/quota/claude"
+
+five_pct=0; five_reset=""; week_pct=0; week_reset=""; quota_source=""
+statusline_overlay_quota_cache "$qc"
+assert_eq "missing cache file: caller's own values untouched" "0" "$five_pct"
+assert_eq "missing cache file: quota_source stays empty" "" "$quota_source"
+
+statusline_write_quota_if_newer "$qc" 42 1700000000 55 1700100000 P 500
+five_pct=0; five_reset=""; week_pct=0; week_reset=""; quota_source=""
+statusline_overlay_quota_cache "$qc"
+assert_eq "overlays the cached 5h percent" "42" "$five_pct"
+assert_eq "overlays the cached 5h reset" "1700000000" "$five_reset"
+assert_eq "overlays the cached 7d percent" "55" "$week_pct"
+assert_eq "overlays the cached 7d reset" "1700100000" "$week_reset"
+assert_eq "overlays the source tag" "P" "$quota_source"
+
+five_pct="already-live"; quota_source="already-live"
+statusline_overlay_quota_cache "$qc"
+assert_ne "a non-empty cached 5h percent still overwrites the caller's own value" "already-live" "$five_pct"
+
 section "statusline_read_static"
 th_tmp_runtime
 source "$REPO_ROOT/src/statusline/cache.sh"
