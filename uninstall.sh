@@ -26,7 +26,10 @@
 #
 # Anything left under ~/opt/agent-statusline after that is a genuine orphan
 # - not something this script recognizes - and gets listed for you to check
-# by hand rather than being silently deleted or silently ignored.
+# by hand rather than being silently deleted or silently ignored. A known
+# target (src/state/locks/logs) that still won't fully clear after retries
+# is reported separately instead - almost always another session actively
+# rendering and repopulating it, not an unrecognized orphan.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -62,8 +65,25 @@ done
 
 step "runtime tree ($RUNTIME)"
 if [ -d "$RUNTIME" ]; then
-    rm -rf "$RUNTIME/src" "$RUNTIME/state" "$RUNTIME/locks" "$RUNTIME/logs" \
-        "$RUNTIME/$QUOTA_LABEL.plist"
+    # A concurrently-running Claude/Codex session's own live statusline
+    # render can recreate files under state/ (git cache, heartbeat,
+    # static/*) while this runs - rm -rf racing a writer fails with
+    # "Directory not empty" on the parent dir, not silently, and the
+    # partially-removed dir would otherwise look exactly like an
+    # unrecognized orphan below even though this script fully intends to
+    # remove it. A render finishes in well under a second, so a few short
+    # retries clear a transient collision in practice; this is not a lock
+    # against every future render, just enough slack for whatever render
+    # was in flight when this script started.
+    known_targets="src state locks logs"
+    for target in $known_targets; do
+        for attempt in 1 2 3; do
+            rm -rf "$RUNTIME/$target" 2>/dev/null
+            [ -d "$RUNTIME/$target" ] || break
+            sleep 0.5
+        done
+    done
+    rm -f "$RUNTIME/$QUOTA_LABEL.plist"
     installed "removed deployed code and cache/log/lock state"
     # rmdir only succeeds on an empty directory - an install that never
     # actually collected data (or never built the Codex patch) leaves
@@ -73,12 +93,19 @@ if [ -d "$RUNTIME" ]; then
     rmdir "$RUNTIME/codex-patch" 2>/dev/null
     [ -d "$RUNTIME/codex-patch" ] && skip "preserved $RUNTIME/codex-patch (expensive to rebuild)"
 
+    still_racing=""
+    for target in $known_targets; do
+        [ -d "$RUNTIME/$target" ] && still_racing="$still_racing $target"
+    done
+    [ -n "$still_racing" ] && fail "couldn't fully remove:$still_racing - most likely another Claude/Codex session is still actively rendering and repopulating it faster than this can clear it; wait for other sessions to finish, then re-run"
+
     orphans="$(find "$RUNTIME" -mindepth 1 -maxdepth 1 \
-        ! -name data ! -name codex-patch 2>/dev/null)"
+        ! -name data ! -name codex-patch ! -name src ! -name state \
+        ! -name locks ! -name logs 2>/dev/null)"
     if [ -n "$orphans" ]; then
         fail "orphan files/dirs under $RUNTIME - not recognized by this script, check by hand:"
         printf '%s\n' "$orphans" | sed 's/^/      /'
-    else
+    elif [ -z "$still_racing" ]; then
         rmdir "$RUNTIME" 2>/dev/null || true
         ok "no orphans found"
     fi
