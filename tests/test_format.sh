@@ -113,4 +113,48 @@ assert_contains "index 2 with numeric five_reset formats a 5h reset line" "$out"
 statusline_rotating_time 2 "08/30 12:00:00" 1700000000 "unknown" out
 assert_eq "index 2 with non-numeric five_reset falls back to datetime" "08/30 12:00:00" "$out"
 
+section "statusline_spinner_frame"
+statusline_spinner_frame 3 out; assert_eq "frame 3 picks the 4th glyph" "⠸" "$out"
+statusline_spinner_frame 13 out; assert_eq "wraps around every 10 seconds" "⠸" "$out"
+statusline_spinner_frame 0 out; assert_eq "frame 0 picks the 1st glyph" "⠋" "$out"
+
+section "statusline_format_remaining"
+statusline_format_remaining 0 out; assert_eq "0s floors to 1m, never 0m" "1m" "$out"
+statusline_format_remaining -100 out; assert_eq "negative input clamps to 0 -> 1m" "1m" "$out"
+statusline_format_remaining 30 out; assert_eq "30s rounds to 1m" "1m" "$out"
+statusline_format_remaining 90 out; assert_eq "90s rounds to 2m" "2m" "$out"
+statusline_format_remaining 3599 out; assert_eq "59m59s rounds up into 1h" "1h" "$out"
+statusline_format_remaining 4200 out; assert_eq "70m rounds to 1h" "1h" "$out"
+statusline_format_remaining 86399 out; assert_eq "23h59m59s rounds up into 1d" "1d" "$out"
+statusline_format_remaining 90000 out; assert_eq "25h formats as 1d1h" "1d1h" "$out"
+statusline_format_remaining 399600 out; assert_eq "4d15h formats with no space" "4d15h" "$out"
+
+section "statusline_reset_severity_color (period=1000 for round numbers)"
+statusline_reset_severity_color 0 1000 out; assert_eq "0% remaining is green" "$STATUSLINE_GREEN" "$out"
+statusline_reset_severity_color 50 1000 out; assert_eq "5% remaining is still green" "$STATUSLINE_GREEN" "$out"
+statusline_reset_severity_color 100 1000 out; assert_eq "10% remaining crosses into white" "$STATUSLINE_GRAY_1" "$out"
+statusline_reset_severity_color 150 1000 out; assert_eq "15% remaining is still white" "$STATUSLINE_GRAY_1" "$out"
+statusline_reset_severity_color 200 1000 out; assert_eq "20% remaining falls back to gray" "$STATUSLINE_GRAY_4" "$out"
+statusline_reset_severity_color 10 0 out; assert_eq "zero-length period never divides by zero, stays gray" "$STATUSLINE_GRAY_4" "$out"
+
+section "statusline_reset_part"
+statusline_reset_part 1000 "" 18000 out
+assert_eq "blank reset shows a gray placeholder" "${STATUSLINE_GRAY_4}--${STATUSLINE_RESET}" "$out"
+statusline_reset_part 1000 "unknown" 18000 out
+assert_eq "non-numeric reset shows the same placeholder" "${STATUSLINE_GRAY_4}--${STATUSLINE_RESET}" "$out"
+statusline_reset_part 1000 1000 18000 out
+assert_eq "reset exactly now shows 'now' in green" "${STATUSLINE_GREEN}now${STATUSLINE_RESET}" "$out"
+statusline_reset_part 1000 500 18000 out
+assert_eq "reset already in the past also shows 'now' in green" "${STATUSLINE_GREEN}now${STATUSLINE_RESET}" "$out"
+statusline_reset_part 0 2000 18000 out
+assert_contains "future reset formats the countdown" "$(strip_ansi "$out")" "33m"
+assert_contains "...colored by its own severity" "$out" "$STATUSLINE_GRAY_1"
+
+section "statusline_resets_segment"
+statusline_resets_segment 0 2000 14400 out
+plain="$(strip_ansi "$out")"
+assert_eq "assembles both values behind a gray label" "Resets: 33m, 4h" "$plain"
+statusline_resets_segment 0 "" "" out
+assert_eq "both unknown falls back to two placeholders" "Resets: --, --" "$(strip_ansi "$out")"
+
 harness_summary

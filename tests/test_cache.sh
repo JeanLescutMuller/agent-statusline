@@ -246,6 +246,29 @@ five_pct="already-live"; quota_source="already-live"
 statusline_overlay_quota_cache "$qc"
 assert_ne "a non-empty cached 5h percent still overwrites the caller's own value" "already-live" "$five_pct"
 
+section "statusline_advance_spin_index"
+th_tmp_runtime
+source "$REPO_ROOT/src/statusline/cache.sh"
+statusline_cache_init
+
+statusline_advance_spin_index claude out
+assert_eq "first call starts at 1 (no prior state)" "1" "$out"
+statusline_advance_spin_index claude out
+assert_eq "second call advances to 2" "2" "$out"
+
+printf '9\n' > "$STATUSLINE_STATE_DIR/spin/claude"
+statusline_advance_spin_index claude out
+assert_eq "wraps from 9 back to 0" "0" "$out"
+
+printf 'garbage\n' > "$STATUSLINE_STATE_DIR/spin/claude"
+statusline_advance_spin_index claude out
+assert_eq "a corrupt counter file resets to 1 instead of erroring" "1" "$out"
+
+statusline_advance_spin_index codex codex_out
+assert_eq "a different provider gets its own independent counter" "1" "$codex_out"
+statusline_advance_spin_index claude out
+assert_eq "...and doesn't disturb claude's own counter" "2" "$out"
+
 section "statusline_read_static"
 th_tmp_runtime
 source "$REPO_ROOT/src/statusline/cache.sh"

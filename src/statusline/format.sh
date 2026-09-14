@@ -14,6 +14,8 @@ STATUSLINE_CYAN=$'\033[38;5;51m'
 STATUSLINE_PURPLE=$'\033[38;5;141m'
 STATUSLINE_BAR_EMPTY=$'\033[38;5;238m'
 
+STATUSLINE_SPINNER_FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
 statusline_display_path() {
     local path="$1" output_name="$2" display
     case "$path" in
@@ -53,6 +55,100 @@ statusline_rotating_time() {
         result="5h reset at $(statusline_fmt_epoch "$five_reset" '%Hh%M')"
     fi
     printf -v "$output_name" '%s' "$result"
+}
+
+statusline_spinner_frame() {
+    local now="$1" output_name="$2"
+    local index=$(( (10#$now) % 10 ))
+    printf -v "$output_name" '%s' "${STATUSLINE_SPINNER_FRAMES[$index]}"
+}
+
+# statusline_format_remaining - render a countdown in seconds as the
+# smallest unit that stays readable ("45m", "4h", "4d15h"), rounding to the
+# nearest unit at whatever granularity is displayed rather than truncating,
+# so e.g. 23h59m shows as "1d" instead of "0d23h".
+statusline_format_remaining() {
+    local remain="$1" output_name="$2"
+    local minutes hours days rem_hours result
+    [ "$remain" -lt 0 ] && remain=0
+
+    minutes=$(( (remain + 30) / 60 ))
+    [ "$minutes" -lt 1 ] && minutes=1
+
+    if [ "$minutes" -lt 60 ]; then
+        result="${minutes}m"
+    else
+        hours=$(( (remain + 1800) / 3600 ))
+        if [ "$hours" -lt 24 ]; then
+            result="${hours}h"
+        else
+            days=$(( remain / 86400 ))
+            rem_hours=$(( (remain % 86400 + 1800) / 3600 ))
+            if [ "$rem_hours" -ge 24 ]; then
+                days=$((days + 1))
+                rem_hours=0
+            fi
+            if [ "$rem_hours" -eq 0 ]; then
+                result="${days}d"
+            else
+                result="${days}d${rem_hours}h"
+            fi
+        fi
+    fi
+    printf -v "$output_name" '%s' "$result"
+}
+
+# statusline_reset_severity_color - gray by default, white as a limit's
+# reset gets close, green as it gets really close. Thresholds are a
+# percentage of the limit's own period (not an absolute time), so the same
+# 15%/5% rule gives sensible absolute cutoffs for both a 5h and a 7d limit.
+statusline_reset_severity_color() {
+    local remain="$1" period="$2" output_name="$3"
+    local ratio_pct selected_color
+    [ "$remain" -lt 0 ] && remain=0
+    if [ "$period" -le 0 ]; then
+        selected_color="$STATUSLINE_GRAY_4"
+    else
+        ratio_pct=$(( remain * 100 / period ))
+        if [ "$ratio_pct" -le 5 ]; then selected_color="$STATUSLINE_GREEN"
+        elif [ "$ratio_pct" -le 15 ]; then selected_color="$STATUSLINE_GRAY_1"
+        else selected_color="$STATUSLINE_GRAY_4"
+        fi
+    fi
+    printf -v "$output_name" '%s' "$selected_color"
+}
+
+# statusline_reset_part - one "<color>4h</>" value for statusline_resets_segment.
+# period is the limit's own window in seconds (18000 for 5h, 604800 for 7d),
+# used only to scale statusline_reset_severity_color's thresholds.
+statusline_reset_part() {
+    local now="$1" reset="$2" period="$3" output_name="$4"
+    local remain color text
+    if ! [[ "$reset" =~ ^[0-9]+$ ]]; then
+        printf -v "$output_name" '%s' "${STATUSLINE_GRAY_4}--${STATUSLINE_RESET}"
+        return
+    fi
+    remain=$((reset - now))
+    if [ "$remain" -le 0 ]; then
+        color="$STATUSLINE_GREEN"
+        text="now"
+    else
+        statusline_reset_severity_color "$remain" "$period" color
+        statusline_format_remaining "$remain" text
+    fi
+    printf -v "$output_name" '%s' "${color}${text}${STATUSLINE_RESET}"
+}
+
+# statusline_resets_segment - replaces the old datetime/5h/7d rotating
+# carousel with a single always-visible "Resets: 4h, 4d15h" summary, each
+# value colored by how close its own limit is to resetting.
+statusline_resets_segment() {
+    local now="$1" five_reset="$2" week_reset="$3" output_name="$4"
+    local five_part week_part
+    statusline_reset_part "$now" "$five_reset" 18000 five_part
+    statusline_reset_part "$now" "$week_reset" 604800 week_part
+    printf -v "$output_name" '%s' \
+        "${STATUSLINE_GRAY_4}Resets: ${STATUSLINE_RESET}${five_part}${STATUSLINE_GRAY_4}, ${STATUSLINE_RESET}${week_part}"
 }
 
 statusline_severity_color() {

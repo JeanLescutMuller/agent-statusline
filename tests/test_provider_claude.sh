@@ -51,6 +51,22 @@ assert_contains "line 1 shows model + effort" "$TH_OUT" "Opus (high)"
 assert_contains "line 1 collapses the cwd under HOME to ~" "$TH_OUT" "~/proj"
 assert_contains "line 1 shows the git branch" "$TH_OUT" "🌿 main"
 assert_contains "line 2 shows the session id" "$TH_OUT" "session-abc123"
+assert_contains "line 2 shows the resets summary" "$TH_OUT" "Resets: "
+assert_match "line 2 ends with a braille spinner glyph" "$TH_OUT" '[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]'
+
+section "the spinner advances every render, independent of wall-clock time"
+# Regression test: this used to key the spinner frame off `now % 10`, which
+# visibly froze under Claude Code's own default statusLine refreshInterval
+# of 10s (consecutive renders land ~10s apart, so `now % 10` kept landing on
+# the same remainder). Two renders in immediate succession - same wall-clock
+# second, quite possibly - must still show two different frames.
+extract_spinner() { printf '%s\n' "$1" | sed -n '2p' | grep -oE '[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]' | tail -1; }
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-spin.XXXXXX")"
+run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
+spin_a="$(extract_spinner "$TH_OUT")"
+run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
+spin_b="$(extract_spinner "$TH_OUT")"
+assert_ne "back-to-back renders show different spinner frames" "$spin_a" "$spin_b"
 assert_contains "line 3 shows the context percentage" "$TH_OUT" "42%"
 assert_contains "line 3 shows the 5h percentage" "$TH_OUT" "55%"
 assert_contains "line 3 shows the 7d percentage" "$TH_OUT" "70%"

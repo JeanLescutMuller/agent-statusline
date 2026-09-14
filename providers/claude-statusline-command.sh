@@ -7,8 +7,7 @@ source "$lib_dir/cache.sh"
 source "$lib_dir/format.sh"
 statusline_cache_init
 
-clock="$(date '+%s|%m/%d %H:%M:%S|%S')"
-IFS='|' read -r now datetime seconds <<< "$clock"
+now="$(date '+%s')"
 
 statusline_touch_heartbeat claude "$now"
 
@@ -68,9 +67,10 @@ statusline_overlay_quota_cache "$STATUSLINE_STATE_DIR/quota/claude"
 
 statusline_common_segments
 
-rotate_index=$((10#$seconds / 10 % 3))
-statusline_rotating_time "$rotate_index" "$datetime" "$week_reset" "$five_reset" rotate
+statusline_resets_segment "$now" "$five_reset" "$week_reset" resets_segment
+statusline_advance_spin_index claude spin_index
+statusline_spinner_frame "$spin_index" spinner
 
 printf '%s\n' "${STATUSLINE_GRAY_1}🤖 ${model_display}${STATUSLINE_RESET}    ${host_color}🖥️  ${STATUSLINE_HOSTNAME}${STATUSLINE_RESET}    ${STATUSLINE_GRAY_2}📂 ${display_cwd}${STATUSLINE_RESET}${git_segment}"
-printf '%s\n' "${STATUSLINE_GRAY_4}🆔 ${session_id}    ${rotate}${STATUSLINE_RESET}"
+printf '%s\n' "${STATUSLINE_GRAY_4}🆔 ${session_id}    ${resets_segment}    ${spinner}${STATUSLINE_RESET}"
 printf '%s\n' "${context_segment}    ${five_segment}    ${week_segment}${memory_segment}"

@@ -204,6 +204,31 @@ statusline_touch_heartbeat() {
     printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/heartbeat/$provider" 2>/dev/null || true
 }
 
+# statusline_advance_spin_index - a small persisted counter, incremented by
+# one and wrapped mod 10 on every render, used to pick a spinner frame that
+# visibly changes every render regardless of the host's configured
+# statusLine refreshInterval. A plain now-based modulo doesn't work here:
+# when refreshInterval evenly divides the modulus (Claude Code's own
+# settings.json commonly sets refreshInterval: 10, exactly matching a
+# mod-10 spinner), `now % 10` lands on the same remainder every single
+# render and the spinner visibly freezes. No locking needed - like the
+# heartbeat file, a lost or duplicate increment under a race is invisible
+# cosmetically, not worth a lock for that low a stake.
+statusline_advance_spin_index() {
+    local provider="$1" output_name="$2"
+    local spin_dir="$STATUSLINE_STATE_DIR/spin" spin_file current next
+    mkdir -p "$spin_dir"
+    spin_file="$spin_dir/$provider"
+    current=""
+    [ -f "$spin_file" ] && IFS= read -r current < "$spin_file"
+    case "$current" in
+        ''|*[!0-9]*) current=0 ;;
+    esac
+    next=$(( (current + 1) % 10 ))
+    printf '%s\n' "$next" > "$spin_file" 2>/dev/null || true
+    printf -v "$output_name" '%s' "$next"
+}
+
 # Overlays cached FS-separated quota values onto the caller's own
 # five_pct/five_reset/week_pct/week_reset/quota_source (same implicit-variable
 # convention as statusline_common_segments in format.sh) - only overlays
