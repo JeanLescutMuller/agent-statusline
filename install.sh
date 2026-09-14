@@ -9,12 +9,18 @@
 # install/uninstall pair is easier to keep correct forever than an
 # ever-growing pile of one-off legacy-layout guards in this file.
 #
-# Deploys the shared cache/format library and the Claude/Codex provider
-# adapters, deploys the quota-tracking research tooling (folded in from the
-# former agent-quota-tracker repo - see adhoc_quotas_analysis/AGENTS.md) and
-# the scheduled pollers under src/quota_polling/ plus their LaunchAgent, and -
-# when Codex is installed - builds/deploys the status-line-command patch and
-# wires ~/.codex/config.toml's [tui] status-line keys.
+# Deploys the shared cache/format library, the Claude/Codex provider
+# adapters, and the scheduled pollers under src/quota_polling/ plus their
+# LaunchAgent, and - when Codex is installed - builds/deploys the
+# status-line-command patch and wires ~/.codex/config.toml's [tui]
+# status-line keys. Does NOT deploy adhoc_quotas_analysis/ - that's
+# ad-hoc, run-by-hand research tooling (folded in from the former
+# agent-quota-tracker repo - see adhoc_quotas_analysis/AGENTS.md), and per
+# this machine's own ~/dev vs ~/opt convention (~/.claude/CLAUDE.md /
+# ~/AGENTS.md - ~/opt/ is for what a scheduler runs unattended, not
+# anything a human runs by hand) it stays in ~/dev/agent-statusline and
+# runs from there, even though it reads/writes this project's live
+# ~/opt/agent-statusline/data/.
 #
 # Depends on bootstrap-home's ~/opt/bootstrap-home/bin/get_host_color being on
 # disk (used by the cache library for a deterministic per-host color); its
@@ -64,14 +70,8 @@ _deploy "$SCRIPT_DIR/providers/claude-statusline-command.sh" "$HOME/.claude/stat
 _deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
 
 step "runtime state"
-mkdir -p "$RUNTIME/state/static" "$RUNTIME/locks" "$RUNTIME/logs"
+mkdir -p "$RUNTIME/state/static" "$RUNTIME/locks" "$RUNTIME/logs" "$RUNTIME/data"
 ok "runtime state"
-
-step "quota tracker"
-mkdir -p "$RUNTIME/adhoc_quotas_analysis" "$RUNTIME/data"
-for f in "$SCRIPT_DIR"/adhoc_quotas_analysis/*.py; do
-    _deploy "$f" "$RUNTIME/adhoc_quotas_analysis/$(basename "$f")"
-done
 
 step "quota polling"
 mkdir -p "$RUNTIME/src/quota_polling"

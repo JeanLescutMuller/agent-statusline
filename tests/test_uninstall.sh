@@ -35,7 +35,6 @@ assert_file_missing "LaunchAgent symlink removed" \
 assert_file_missing "Claude provider adapter removed" "$th_home/.claude/statusline-command.sh"
 assert_file_missing "Codex provider adapter removed" "$th_home/.codex/statusline-command.sh"
 assert_file_missing "deployed shared lib removed" "$th_home/opt/agent-statusline/src"
-assert_file_missing "deployed quota research tooling removed" "$th_home/opt/agent-statusline/adhoc_quotas_analysis"
 assert_file_missing "runtime state removed" "$th_home/opt/agent-statusline/state"
 assert_file_missing "the whole runtime dir is gone when nothing was left to preserve (data/ was never populated)" \
     "$th_home/opt/agent-statusline"

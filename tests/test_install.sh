@@ -49,9 +49,9 @@ assert_file_exists "poll_claude.py deployed under ~/opt/agent-statusline/src/quo
     "$th_home/opt/agent-statusline/src/quota_polling/poll_claude.py"
 assert_file_exists "poll_codex.py deployed" "$th_home/opt/agent-statusline/src/quota_polling/poll_codex.py"
 assert_file_exists "poll_all.py deployed" "$th_home/opt/agent-statusline/src/quota_polling/poll_all.py"
-assert_file_exists "split_quota_log.py deployed under adhoc_quotas_analysis" \
-    "$th_home/opt/agent-statusline/adhoc_quotas_analysis/split_quota_log.py"
 assert_file_exists "data/ created for the shared log" "$th_home/opt/agent-statusline/data"
+assert_file_missing "adhoc_quotas_analysis/ is ad-hoc/dev-only, never deployed" \
+    "$th_home/opt/agent-statusline/adhoc_quotas_analysis"
 assert_file_exists "LaunchAgent plist written" \
     "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist"
 assert_contains "plist points at src/quota_polling/poll_all.py" \

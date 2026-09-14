@@ -96,21 +96,24 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
 - `~/dev/agent-statusline/adhoc_quotas_analysis/` — this directory, part of the
   `agent-statusline` git repo (full history from the standalone
   `agent-quota-tracker` repo preserved under this prefix). Source of truth
-  for the not-scheduled, run-by-hand research tooling. **Never edit the
-  deployed copy directly.**
+  **and the only copy** for the not-scheduled, run-by-hand research
+  tooling (`split_quota_log.py`, `recompute_token_events.py`,
+  `recompute_codex_events.py`, `analysis.ipynb`) — run everything here
+  directly, there is nothing to redeploy (see "Naming history" step 9
+  below for why this changed from an earlier design that did deploy the
+  `.py` scripts). The two recompute scripts' output
+  (`claude-token-events.jsonl`, `codex-token-events.jsonl`) is written
+  beside them, in this same directory — see "Data files" below.
 - `~/dev/agent-statusline/src/quota_polling/` — sibling source tree for the
   LaunchAgent-scheduled pollers, split out of this directory 2026-08-31
-  (see "Naming history" below).
-- `~/opt/agent-statusline/adhoc_quotas_analysis/` — deployed
-  `split_quota_log.py`, `recompute_token_events.py`,
-  `recompute_codex_events.py`, plus the two token-event output files
-  (`claude-token-events.jsonl`, `codex-token-events.jsonl`, written here
-  directly, not under `data/` — see "Data files" below).
-  `~/opt/agent-statusline/src/quota_polling/` — deployed `poll_claude.py`,
-  `poll_codex.py`, `poll_all.py`. `~/opt/agent-statusline/data/` (a sibling
-  of both) holds the two quota logs — gitignored, lives only here. Edit
-  code in `~/dev/agent-statusline`, then re-run `./install.sh` to redeploy
-  (see that repo's own `install.sh`, not a separate one here).
+  (see "Naming history" below). **Never edit the deployed copy directly.**
+- `~/opt/agent-statusline/src/quota_polling/` — deployed `poll_claude.py`,
+  `poll_codex.py`, `poll_all.py` (the only things from this project's
+  scope that are actually scheduled/deployed - see this machine's own
+  `~/dev` vs `~/opt` convention in `~/AGENTS.md`). `~/opt/agent-statusline/data/`
+  holds the two quota logs — gitignored, lives only here. Edit code in
+  `~/dev/agent-statusline`, then re-run `./install.sh` to redeploy (see
+  that repo's own `install.sh`, not a separate one here).
 - `~/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist` — symlink
   only, points into `~/opt/agent-statusline/`. Never a real file there.
 - LaunchAgent ticks `poll_all.py` every 60s (`StartInterval=60`, changed from
@@ -219,6 +222,25 @@ Renamed three times as a standalone repo, then merged:
    it was confirmed dead: the pre-split poller-under-`adhoc_quotas_analysis/`
    layout it guarded against had never actually been deployed on this
    machine, so the block could never fire.
+9. → `install.sh` **stopped deploying** `split_quota_log.py`,
+   `recompute_token_events.py`, and `recompute_codex_events.py` to
+   `~/opt/agent-statusline/adhoc_quotas_analysis/` - 2026-09-14, after the
+   `agent-quota-tracker` predecessor's live `~/opt/` deploy was fully
+   decommissioned and deleted (2026-09-13, see this machine's own
+   `~/AGENTS.md`/`~/.claude/CLAUDE.md` "Monitoring" section) and the
+   machine-wide `~/dev` vs `~/opt` convention in that same file was
+   sharpened to explicitly restrict `~/opt/` to what a scheduler runs
+   unattended - ad-hoc, run-by-hand tooling belongs in `~/dev/<project>`
+   even when it touches that project's live `~/opt/` data, full stop, no
+   exception for "but it's convenient to run from the deployed copy."
+   These three scripts (and their output, `claude-token-events.jsonl`/
+   `codex-token-events.jsonl`) now live and run only from
+   `~/dev/agent-statusline/adhoc_quotas_analysis/` - see "Repo ↔ deploy
+   layout" above. `uninstall.sh`'s explicit-removal list for this
+   directory was dropped at the same time (nothing to remove there
+   anymore); its generic orphan detection still flags a leftover
+   `~/opt/agent-statusline/adhoc_quotas_analysis/` from an old install for
+   the user to clean up by hand, same as any other unrecognized path.
 
 **Update (later than the numbered history above):** `agent-statusline`'s
 `install.sh` no longer self-migrates from any of these prior layouts - the
@@ -970,11 +992,12 @@ it.
 ## How to continue the investigation
 
 ```bash
-# after code changes, or on a fresh machine:
+# after code changes to the scheduled pollers, or on a fresh machine:
 ./install.sh
 
 # before any analysis session (claude-token-events.jsonl is not kept incrementally):
-python3 ~/opt/agent-statusline/adhoc_quotas_analysis/recompute_token_events.py
+# run from this directory - recompute_*.py are ad-hoc/dev-only, never deployed.
+python3 recompute_token_events.py
 
 # then open analysis.ipynb and re-run all cells
 ```

@@ -63,7 +63,7 @@ done
 step "runtime tree ($RUNTIME)"
 if [ -d "$RUNTIME" ]; then
     rm -rf "$RUNTIME/src" "$RUNTIME/state" "$RUNTIME/locks" "$RUNTIME/logs" \
-        "$RUNTIME/adhoc_quotas_analysis" "$RUNTIME/$QUOTA_LABEL.plist"
+        "$RUNTIME/$QUOTA_LABEL.plist"
     installed "removed deployed code and cache/log/lock state"
     # rmdir only succeeds on an empty directory - an install that never
     # actually collected data (or never built the Codex patch) leaves

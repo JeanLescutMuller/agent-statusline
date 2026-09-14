@@ -217,9 +217,7 @@ cd ../  # this is adhoc_quotas_analysis/ - install.sh lives at the agent-statusl
 ```
 
 Idempotent — deploys `poll_claude.py`/`poll_codex.py`/`poll_all.py` to
-`~/opt/agent-statusline/src/quota_polling/`, and `split_quota_log.py` plus
-the two `recompute_*.py` scripts to
-`~/opt/agent-statusline/adhoc_quotas_analysis/`, writes/refreshes the
+`~/opt/agent-statusline/src/quota_polling/`, writes/refreshes the
 `com.jeanlescut.agent-statusline` LaunchAgent plist (pointed at
 `src/quota_polling/poll_all.py`), and (re)loads it via `launchctl
 bootstrap`. Assumes a bare machine - no self-migration from a standalone
@@ -228,8 +226,16 @@ bootstrap`. Assumes a bare machine - no self-migration from a standalone
 moving from one, run the parent repo's `uninstall.sh` first, then
 `install.sh` fresh - see the root `README.md`'s "Usage" section.
 
+`split_quota_log.py` and the two `recompute_*.py` scripts are **not**
+deployed by `install.sh` - they're ad-hoc, run-by-hand tooling, not
+scheduled, so per this machine's own `~/dev` vs `~/opt` convention
+(`~/AGENTS.md`: `~/opt/` is for what a scheduler runs unattended, not
+anything a human runs by hand) they stay in this `~/dev/agent-statusline`
+checkout and run from here directly, even though they read/write this
+project's live `~/opt/agent-statusline/data/`:
+
 ```bash
-python3 ~/opt/agent-statusline/adhoc_quotas_analysis/recompute_token_events.py
+python3 recompute_token_events.py   # run from this directory
 ```
 
 Run this before any analysis session — it's what populates/refreshes
@@ -237,15 +243,15 @@ Run this before any analysis session — it's what populates/refreshes
 
 ## Data files
 
-The two quota logs live under `~/opt/agent-statusline/data/` (a sibling of
-`adhoc_quotas_analysis/` in the deployed runtime, not nested under it, and
-not this source checkout — see the dev-wide convention in
-`~/dev/CLAUDE.md`). The two token-event files, by contrast, live directly
-in `~/opt/agent-statusline/adhoc_quotas_analysis/` itself (not under
-`data/`) — deliberate, since unlike the quota logs they're fully
+The two quota logs live under `~/opt/agent-statusline/data/` (the deployed
+runtime, not this source checkout — see the dev-wide convention in
+`~/AGENTS.md`). The two token-event files, by contrast, live directly in
+this directory (`~/dev/agent-statusline/adhoc_quotas_analysis/`, not
+`~/opt/` at all) — deliberate, since unlike the quota logs they're fully
 recomputable at any time (see `recompute_token_events.py` /
 `recompute_codex_events.py` above), so they don't need the same durable,
-unrecoverable-if-lost treatment.
+unrecoverable-if-lost treatment, and the scripts that produce them are
+themselves ad-hoc/dev-only tooling rather than anything deployed.
 
 **`claude-quota-history.jsonl`** and **`codex-quota-history.jsonl`**
 (`data/`) — one

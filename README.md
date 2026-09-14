@@ -155,7 +155,12 @@ for why each writer exists.
 
 ## Runtime layout
 
-Deploys shared code and state under `~/opt/agent-statusline/`:
+Deploys shared code and state under `~/opt/agent-statusline/`. `adhoc_quotas_analysis/`
+is deliberately not part of this tree - it's ad-hoc, run-by-hand research
+tooling, not scheduled or deployed anywhere, so per this machine's own
+`~/dev` vs `~/opt` convention it stays in the `~/dev/agent-statusline`
+checkout and runs from there (see that directory's own `README.md`/`AGENTS.md`),
+even though it reads/writes this same runtime's `data/`:
 
     ~/opt/agent-statusline/
     ├── src/
@@ -168,12 +173,6 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     │   │   ├── refresh-git-remote.sh    ahead/behind
     │   │   └── refresh-metrics.sh       used/total/percent memory
     │   └── quota_polling/                deployed poll_claude.py, poll_codex.py, poll_all.py
-    ├── adhoc_quotas_analysis/
-    │   ├── split_quota_log.py            one-time migration, run by hand only if you still have an old combined data/quota-log.jsonl
-    │   ├── recompute_token_events.py     not scheduled, run by hand
-    │   ├── recompute_codex_events.py     not scheduled, run by hand
-    │   ├── claude-token-events.jsonl     recomputed Claude token-usage detail
-    │   └── codex-token-events.jsonl      recomputed Codex token-usage detail
     ├── data/
     │   ├── claude-quota-history.jsonl    Claude poll + push quota log (see "Quota tracking")
     │   └── codex-quota-history.jsonl     Codex poll quota log (see "Quota tracking")
