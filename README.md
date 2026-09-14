@@ -334,8 +334,8 @@ Quota polling (see "Quota tracking" above; deployed, LaunchAgent-scheduled, unat
 Quota research (see "Quota tracking" above; own deep-dive docs in `adhoc_quotas_analysis/AGENTS.md`; not scheduled, run by hand):
 
 - `adhoc_quotas_analysis/split_quota_log.py`: one-time, idempotent migration from the old combined `data/quota-log.jsonl` to the two per-provider files - run by hand only if you still have that old file.
-- `adhoc_quotas_analysis/recompute_token_events.py` / `adhoc_quotas_analysis/recompute_codex_events.py`: rebuilds `adhoc_quotas_analysis/claude-token-events.jsonl` / `codex-token-events.jsonl` from local transcripts.
-- `adhoc_quotas_analysis/analysis.ipynb`: the research notebook - what the quota percentages actually track.
+- `adhoc_quotas_analysis/recompute_codex_events.py`: rebuilds `adhoc_quotas_analysis/codex-token-events.jsonl` from local transcripts (not yet loaded into the notebook - see its own "Codex" section).
+- `adhoc_quotas_analysis/analysis.ipynb`: the research notebook - what the quota percentages actually track. Recomputes `claude-token-events.jsonl` itself, inline, in its own first cells - no separate script for the Claude side.
 
 Codex patch (build-time, one-off; see "Codex status-line patch" above):
 

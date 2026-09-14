@@ -172,19 +172,19 @@ reading is a permanently lost one — there is no way to ask "what was my
 utilization at 3pm yesterday" after the fact. The self-throttling only
 skips ticks it judges unnecessary; it never disables polling outright.
 
-### `recompute_token_events.py` / `recompute_codex_events.py` — not scheduled, run by hand
+### Claude token events — recomputed inline in `analysis.ipynb`, not a script
 
-`recompute_token_events.py` is Claude-only. It rebuilds
-`claude-token-events.jsonl` (in this same directory - see "Data files"
-below) from scratch by scanning every
-`*.jsonl` transcript Claude Code itself writes under
-`~/.claude/projects/`. One record per individual assistant message that
-carries token usage, full fidelity — model, reasoning effort,
-session/cwd/sidechain identity, the cache_creation 5-minute/1-hour
-split, thinking tokens, service tier, speed, stop reason, request/message
-ids — the raw `usage` object kept verbatim, not reduced to a few named
-counters, so a field Anthropic adds later shows up automatically instead
-of silently being dropped. Deliberately excludes message *content* (tool
+Used to be a standalone `recompute_token_events.py` you ran by hand before
+opening the notebook; folded directly into `analysis.ipynb`'s own cells
+2026-09-14 (see `AGENTS.md`'s "Naming history"), since nothing besides the
+notebook ever consumed it. The notebook rebuilds `claude-token-events.jsonl`
+(written beside it, in this same directory - see "Data files" below) from
+scratch on every run, by scanning every `*.jsonl` transcript Claude Code
+itself writes under `~/.claude/projects/`. One record per assistant message
+with token usage — just `ts`/`model`/`usage`, the fields the notebook
+actually reads (trimmed from a richer field set the old script kept "for
+later" and nothing ever read - see the notebook's own recompute cell for
+the current shape). Deliberately excludes message *content* (tool
 inputs/outputs, text) — irrelevant to usage/metering analysis, and it
 would duplicate potentially sensitive conversation content into a
 second, less-protected file for no analytical benefit.
@@ -195,14 +195,15 @@ machine now keeps for `cleanupPeriodDays: 365` (set via `bootstrap-home`,
 see `~/dev/bootstrap-home/files/claude_settings.json` — originally 30
 days, extended specifically to support this project). Since the source
 is durable and a full rebuild only takes a couple of seconds even at
-~14,000 events, there's no reason to also store an incremental copy —
-that would just be logging something that doesn't need logging. Run it
-whenever you're about to analyze the data, so it reflects everything up
-to that moment.
+~24,000 events, there's no reason to also store an incremental copy —
+that would just be logging something that doesn't need logging. Running
+the notebook top to bottom always reflects everything up to that moment.
 
-`recompute_codex_events.py` is the Codex analogue, same rationale and
-shape: it rebuilds `codex-token-events.jsonl` (also in this directory)
-from scratch by scanning every `*.jsonl` rollout under `~/.codex/sessions/` for
+`recompute_codex_events.py` (still a standalone script — Codex-side data
+isn't loaded into the notebook yet, see the "Codex" section near its end)
+is the Codex analogue, same rationale and shape: it rebuilds
+`codex-token-events.jsonl` (also in this directory) from scratch by
+scanning every `*.jsonl` rollout under `~/.codex/sessions/` for
 `token_count` events — one record per turn, carrying the full token-usage
 breakdown *and* the `rate_limits` snapshot logged alongside it. Pure
 local-file parsing, no API/RPC call — this is exactly the data
@@ -226,20 +227,16 @@ bootstrap`. Assumes a bare machine - no self-migration from a standalone
 moving from one, run the parent repo's `uninstall.sh` first, then
 `install.sh` fresh - see the root `README.md`'s "Usage" section.
 
-`split_quota_log.py` and the two `recompute_*.py` scripts are **not**
+`split_quota_log.py` and `recompute_codex_events.py` are **not**
 deployed by `install.sh` - they're ad-hoc, run-by-hand tooling, not
 scheduled, so per this machine's own `~/dev` vs `~/opt` convention
 (`~/AGENTS.md`: `~/opt/` is for what a scheduler runs unattended, not
 anything a human runs by hand) they stay in this `~/dev/agent-statusline`
 checkout and run from here directly, even though they read/write this
-project's live `~/opt/agent-statusline/data/`:
-
-```bash
-python3 recompute_token_events.py   # run from this directory
-```
-
-Run this before any analysis session — it's what populates/refreshes
-`claude-token-events.jsonl` in this same directory.
+project's live `~/opt/agent-statusline/data/`. There's nothing to run for
+the Claude side any more — just open `analysis.ipynb` in this directory
+and run it top to bottom; its own cells recompute `claude-token-events.jsonl`
+before loading it (see "Claude token events" above).
 
 ## Data files
 
@@ -248,10 +245,11 @@ runtime, not this source checkout — see the dev-wide convention in
 `~/AGENTS.md`). The two token-event files, by contrast, live directly in
 this directory (`~/dev/agent-statusline/adhoc_quotas_analysis/`, not
 `~/opt/` at all) — deliberate, since unlike the quota logs they're fully
-recomputable at any time (see `recompute_token_events.py` /
-`recompute_codex_events.py` above), so they don't need the same durable,
-unrecoverable-if-lost treatment, and the scripts that produce them are
-themselves ad-hoc/dev-only tooling rather than anything deployed.
+recomputable at any time (`claude-token-events.jsonl` by `analysis.ipynb`
+itself, `codex-token-events.jsonl` by `recompute_codex_events.py` — see
+"Claude token events" above), so they don't need the same durable,
+unrecoverable-if-lost treatment, and nothing that produces them is
+deployed anywhere.
 
 **`claude-quota-history.jsonl`** and **`codex-quota-history.jsonl`**
 (`data/`) — one

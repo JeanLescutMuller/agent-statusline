@@ -30,8 +30,8 @@ agent-statusline/
 ├── adhoc_quotas_analysis/        # quota research: folded in from the former agent-quota-tracker repo,
 │                                 # full git history preserved under this prefix (see its own AGENTS.md)
 │   ├── split_quota_log.py        # one-time, idempotent log-split migration, run by hand only if you still have an old combined data/quota-log.jsonl
-│   ├── recompute_token_events.py / recompute_codex_events.py   # not scheduled, run by hand
-│   ├── analysis.ipynb            # research notebook
+│   ├── recompute_codex_events.py # not scheduled, run by hand (Claude side is now inline in analysis.ipynb's own cells)
+│   ├── analysis.ipynb            # research notebook - recomputes claude-token-events.jsonl itself, top of the notebook
 │   └── AGENTS.md                 # deep-dive: investigation, findings, gotchas - not force-merged into this file
 ├── codex-patch/                   # Codex patch: build-time, one-off, unrelated to what runs on a render
 │   ├── install-codex-statusline-patch.sh   # clone/patch/build/deploy the Codex binary

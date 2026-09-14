@@ -97,13 +97,14 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   `agent-statusline` git repo (full history from the standalone
   `agent-quota-tracker` repo preserved under this prefix). Source of truth
   **and the only copy** for the not-scheduled, run-by-hand research
-  tooling (`split_quota_log.py`, `recompute_token_events.py`,
-  `recompute_codex_events.py`, `analysis.ipynb`) — run everything here
-  directly, there is nothing to redeploy (see "Naming history" step 9
-  below for why this changed from an earlier design that did deploy the
-  `.py` scripts). The two recompute scripts' output
-  (`claude-token-events.jsonl`, `codex-token-events.jsonl`) is written
-  beside them, in this same directory — see "Data files" below.
+  tooling (`split_quota_log.py`, `recompute_codex_events.py`,
+  `analysis.ipynb`) — run everything here directly, there is nothing to
+  redeploy (see "Naming history" steps 9-10 below for why this changed from
+  an earlier design that did deploy the `.py` scripts, and why
+  `recompute_token_events.py` isn't even a separate file any more). Output
+  (`claude-token-events.jsonl`, written by `analysis.ipynb`'s own recompute
+  cell; `codex-token-events.jsonl`, written by `recompute_codex_events.py`)
+  lands in this same directory — see "Data files" below.
 - `~/dev/agent-statusline/src/quota_polling/` — sibling source tree for the
   LaunchAgent-scheduled pollers, split out of this directory 2026-08-31
   (see "Naming history" below). **Never edit the deployed copy directly.**
@@ -241,6 +242,32 @@ Renamed three times as a standalone repo, then merged:
    anymore); its generic orphan detection still flags a leftover
    `~/opt/agent-statusline/adhoc_quotas_analysis/` from an old install for
    the user to clean up by hand, same as any other unrecognized path.
+10. → `recompute_token_events.py` stopped existing as a file - 2026-09-14,
+    same day as step 9, prompted by the user asking "why do we have .py
+    files, can't we just have a single .ipynb?" while reading the
+    notebook fresh. Checked first: nothing else in the repo imports either
+    recompute script as a module or invokes it from anywhere but a human
+    terminal (confirmed by grep), so there was no real reason for this one
+    to be a separate file - `analysis.ipynb` was its only consumer, always
+    reading its pre-generated output rather than calling into it. Its
+    scan-and-rebuild logic is now the notebook's own second code cell,
+    trimmed to only the three fields (`ts`/`model`/`usage`) anything
+    downstream actually reads (the old script's richer per-event shape -
+    session id, cwd, git branch, stop reason, request/message ids - had no
+    reader anywhere, ever). One side effect worth knowing: the old script
+    epoch-converted timestamps itself (`calendar.timegm`, see "Known
+    gotchas" above for why not `mktime`); the inlined version instead
+    writes the raw ISO string straight from the transcript and lets
+    `pd.Timestamp()` parse it in the notebook's loader cell - one less
+    manual epoch-conversion call site for that whole gotcha class to bite
+    in, not a behavior change (pandas parses a trailing "Z" as UTC the
+    same way `timegm` did). `recompute_codex_events.py` was deliberately
+    left alone, standalone, un-folded - it isn't loaded by any notebook
+    cell yet (see "Natural next steps" #1 below), so there was nothing to
+    fold it into; whether it becomes an inline cell too or stays a script
+    is a decision for whenever that wiring actually happens, not before.
+    `split_quota_log.py` is unrelated (a historical one-time migration
+    tool, never read by the notebook) and wasn't touched either.
 
 **Update (later than the numbered history above):** `agent-statusline`'s
 `install.sh` no longer self-migrates from any of these prior layouts - the
@@ -290,13 +317,16 @@ at `../src/quota_polling/` from this directory (split out 2026-08-31 - see
 - **`poll_all.py`** — the actual LaunchAgent target. Runs the two pollers
   above as subprocesses (not imports), so one crashing can't stop the
   other. Each poller stays fully runnable standalone by hand.
-- **`recompute_token_events.py`** — **not** scheduled, run by hand (or at
-  the top of `analysis.ipynb`'s workflow). Fully rebuilds
-  `claude-token-events.jsonl` (in this same directory, not `data/` - see
-  "Naming history" and "Data files" below) from scratch every time, by
+- **`analysis.ipynb`'s own recompute cell** (not a separate script since
+  2026-09-14 - see "Naming history" step 10) — runs at the top of the
+  notebook, before anything reads `claude-token-events.jsonl`. Fully
+  rebuilds it (in this same directory, not `data/` - see "Naming history"
+  and "Data files" below) from scratch every time the notebook runs, by
   scanning every `*.jsonl` under `~/.claude/projects/`. Stateless — no byte
   offsets, no incremental state, just overwrite-on-demand via a `.tmp` +
-  atomic `.replace()`.
+  atomic `.replace()`. Only keeps `ts`/`model`/`usage` per event - the
+  fields the notebook actually reads (trimmed from a richer field set the
+  old standalone script kept, unread, when this was folded in).
 - **`recompute_codex_events.py`** — the Codex analogue, same rationale
   and same stateless-rebuild shape. Scans every `*.jsonl` under
   `~/.codex/sessions/` for `event_msg` entries of `type: "token_count"`
@@ -995,11 +1025,9 @@ it.
 # after code changes to the scheduled pollers, or on a fresh machine:
 ./install.sh
 
-# before any analysis session (claude-token-events.jsonl is not kept incrementally):
-# run from this directory - recompute_*.py are ad-hoc/dev-only, never deployed.
-python3 recompute_token_events.py
-
-# then open analysis.ipynb and re-run all cells
+# then just open analysis.ipynb and run it top to bottom - its own early
+# cells recompute claude-token-events.jsonl before anything reads it, so
+# there's no separate step for the Claude side any more.
 ```
 
 Natural next steps, roughly in order of value — the cross-window
@@ -1020,10 +1048,14 @@ dead), so it's off this list:
 1. ✅ **`recompute_codex_events.py`** — prototyped 2026-08-30. Scans
    `~/.codex/sessions/**/*.jsonl` for `token_count` events (see
    "Architecture" above) — no RPC/API call, same free local-file
-   approach as `recompute_token_events.py`. This is what lets the
-   notebook's "Codex" section regress token usage against the polled
-   `usedPercent` the same way the Claude section does. Next: actually
-   wire its output into `analysis.ipynb` and run that regression.
+   approach as the notebook's own Claude-side recompute cell. This is
+   what would let the notebook's "Codex" section regress token usage
+   against the polled `usedPercent` the same way the Claude section does.
+   Still not wired in as of 2026-09-14 - still standalone, still unread
+   by `analysis.ipynb`. Next: actually load its output into a DataFrame
+   there and run that regression (and decide then whether to fold it
+   inline the same way the Claude side was, or leave it a script - see
+   "Naming history" step 10).
 2. **Validate the dollar-cost hypothesis directly on Codex**, using the
    *real* per-thread RPC this time (`account/usage/read` called with a
    `threadId`, enumerable from `~/.codex/sessions/`) — this is a genuine

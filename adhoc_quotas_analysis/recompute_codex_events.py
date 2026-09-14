@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Rebuilds codex-token-events.jsonl from scratch by scanning every
 *.jsonl rollout under ~/.codex/sessions/ - the Codex analogue of
-recompute_token_events.py.
+analysis.ipynb's own Claude-side recompute cell (a standalone script here,
+not inline in the notebook, since nothing in the notebook loads this
+file's output yet - see the notebook's "Codex" section).
 
 Codex's local session rollout files were assumed (in an earlier pass
 through AGENTS.md) not to carry token counts at all, on the theory that
@@ -15,7 +17,7 @@ local files and needs no API call.
 
 One record per token_count event. Deliberately excludes turn content
 (reasoning, tool calls, messages) - out of scope for usage/metering
-analysis, same rationale as recompute_token_events.py.
+analysis, same rationale as the notebook's Claude-side recompute cell.
 
 Not scheduled, not incremental, no offset state - run this by hand
 whenever you're about to analyze the data.

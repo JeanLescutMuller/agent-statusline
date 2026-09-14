@@ -9,7 +9,7 @@ expired" and "the wifi dropped" need very different responses.
 
 Token usage is deliberately NOT logged here. It's fully recomputable at
 analysis time from the transcripts Claude Code itself already writes under
-~/.claude/projects/ (see ../../adhoc_quotas_analysis/recompute_token_events.py) - logging it here too
+~/.claude/projects/ (see ../../adhoc_quotas_analysis/analysis.ipynb's own recompute cell) - logging it here too
 would just be storing a copy of data that already durably exists elsewhere
 on disk (cleanupPeriodDays=365 on this machine, so "durably" means about a
 year). Only log what can't be recomputed after the fact.
