@@ -41,11 +41,6 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN} agent-statusline install${NC}"
 echo -e "${GREEN}========================================${NC}"
 
-_backup_before_overwrite() {
-    local target="$1"
-    [ -f "$target" ] && cp "$target" "${target}.bak"
-}
-
 _deploy() {
     local src="$1" target="$2"
     mkdir -p "$(dirname "$target")"
@@ -53,7 +48,6 @@ _deploy() {
         ok "$(basename "$target")"
         return
     fi
-    _backup_before_overwrite "$target"
     cp "$src" "$target"
     chmod +x "$target" 2>/dev/null || true
     installed "$(basename "$target")"
