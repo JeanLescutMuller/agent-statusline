@@ -127,18 +127,24 @@ runs through **two different kinds of file** that are easy to conflate:
   (`five_pct/five_reset/week_pct/week_reset/source/observed_at`, see
   `src/statusline/cache.sh`'s `statusline_write_quota_if_newer` and its
   Python mirror `src/quota_polling/_quota_common.py`'s
-  `write_state_if_newer`). This is what `providers/claude-statusline-command.sh`
-  actually reads for its fallback display. Both Claude writers -
+  `write_state_if_newer`). `providers/claude-statusline-command.sh` always
+  displays whatever's in this file - not a fallback for the one case stdin
+  can't cover, the *only* display path, live rate_limits on stdin or not
+  (see that file's own comment for why: rate_limits on stdin is only
+  that session's own last-known reading, and used to make every open
+  session show its own possibly-different, possibly-stale number instead of
+  the account's actual current usage). Both Claude writers -
   `push-claude-quota.sh` (tag `X`) and `poll_claude.py` (tag `P`) - write to
   it **directly**, each comparing its own reading's `observed_at` (when the
   reading was actually true, never write/render time - see
   `push-claude-quota.sh`'s own header comment for why that distinction
   matters) against whatever's already there and only overwriting if newer.
   Whichever producer has the genuinely freshest reading wins regardless of
-  write order, so a concurrent session's live push can refresh what a
-  brand-new idle session sees just as well as the poller can - no rescan of
-  the historical log involved (that rescan - `refresh-claude-quota.sh` - was
-  removed in this redesign; see git history if you need the old shape).
+  write order, so every open session converges on the same number within
+  about one render cycle - no rescan of the historical log involved (that
+  rescan - `refresh-claude-quota.sh` - and a since-removed third `S` "seed"
+  tag were both cut in this redesign; see git history if you need the old
+  shape).
 
 One thing worth stating plainly since it's easy to get backwards:
 `src/statusline/push-claude-quota.sh` is the *primary* Claude quota path now

@@ -42,7 +42,7 @@ pages 1/2/3 as they come up.
 | `test_refresh_git_remote.sh` | `src/statusline/refresh-git-remote.sh` against a real local bare remote |
 | `test_refresh_metrics.sh` | `src/statusline/refresh-metrics.sh` on the real host |
 | `test_push_claude_quota.sh` | `src/statusline/push-claude-quota.sh` - history-log append (now unconditional) and the `state/quota/claude` freshness-compared write (tag `X`) |
-| `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the P/X/S source-tag overlay chain |
+| `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the P/X source-tag overlay chain and cross-session convergence |
 | `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |
 | `test_install.sh` | `install.sh` - idempotency, Codex-absent skip, the real TOML-merge heredoc |
 | `test_uninstall.sh` | `uninstall.sh` - full removal, `data/`/`codex-patch/` preserved, orphan reporting |

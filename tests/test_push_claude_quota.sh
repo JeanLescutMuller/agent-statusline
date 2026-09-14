@@ -1,8 +1,10 @@
 #!/bin/bash
 # End-to-end tests for src/statusline/push-claude-quota.sh - the free path
 # that (1) appends a claude_statusline row to the shared history log from
-# the statusline's own stdin rate_limits, and (2) updates the shared
-# "latest known quota" state file (tagged X), instead of waiting on
+# the statusline's own stdin rate_limits, whenever the transcript gives a
+# precise timestamp, and (2) always updates the shared "latest known quota"
+# state file (tagged X) - using that same precise timestamp when available,
+# or "now" as a fallback otherwise - instead of waiting on
 # src/quota_polling/poll_claude.py's network poll. See the script's own
 # header comment and adhoc_quotas_analysis/AGENTS.md's "GET /api/oauth/usage
 # 429s" investigation for why the free path exists at all.
@@ -20,6 +22,7 @@ TRANSCRIPT="$TH_HOME/transcript.jsonl"
 write_log() { mkdir -p "$(dirname "$LOG")"; printf '%s\n' "$1" > "$LOG"; }
 write_transcript() { printf '%s\n' "$1" > "$TRANSCRIPT"; }
 row_count() { [ -f "$LOG" ] && wc -l < "$LOG" | tr -d ' ' || echo 0; }
+reset() { rm -f "$LOG" "$STATE"; }
 
 run_push() {
     local err_file
@@ -30,26 +33,44 @@ run_push() {
     rm -f "$err_file"
 }
 
-section "no transcript path at all -> no-op"
-rm -f "$LOG"
-run_push "" 42 "2026-01-01T00:00:00Z" 55 "2026-01-05T00:00:00Z"
+section "no five_pct at all -> true no-op, nothing written anywhere"
+reset
+run_push "" "" "" "" ""
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_file_missing "nothing logged" "$LOG"
 assert_file_missing "state file untouched" "$STATE"
 
-section "transcript path doesn't exist -> no-op"
+section "no transcript_path -> log untouched, state file still written via a now fallback"
+reset
+before="$(date +%s)"
+run_push "" 42 "2026-01-01T00:00:00Z" 55 "2026-01-05T00:00:00Z"
+after="$(date +%s)"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_file_missing "no precise timestamp, so no history row" "$LOG"
+assert_file_exists "state file written anyway - still a live reading" "$STATE"
+IFS="$SEP" read -r st_five st_five_reset st_week st_week_reset st_source st_observed < "$STATE"
+assert_eq "state 5h percent" "42" "$st_five"
+assert_eq "state tagged X" "X" "$st_source"
+[ "$st_observed" -ge "$before" ] && [ "$st_observed" -le "$after" ]
+assert_status "observed_at falls back to roughly now" 0 $?
+
+section "transcript path doesn't exist -> same fallback behavior"
+reset
 run_push "$TH_HOME/nope.jsonl" 42 "" 55 ""
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_file_missing "nothing logged" "$LOG"
+assert_file_missing "no history row" "$LOG"
+assert_file_exists "state file still written" "$STATE"
 
-section "transcript exists but has no timestamped lines -> no-op"
+section "transcript exists but has no timestamped lines -> same fallback behavior"
+reset
 write_transcript '{"type":"summary","leafUuid":"x"}'
 run_push "$TRANSCRIPT" 42 "" 55 ""
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_file_missing "nothing logged" "$LOG"
-assert_file_missing "state file untouched" "$STATE"
+assert_file_missing "no history row" "$LOG"
+assert_file_exists "state file still written" "$STATE"
 
-section "first genuine reading -> appends one row and writes the state file"
+section "first genuine reading (valid transcript) -> a precise history row and state write"
+reset
 write_transcript "$(cat <<'EOF'
 {"type":"user","timestamp":"2026-01-01T10:00:00.000Z"}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05.500Z"}
@@ -73,7 +94,7 @@ assert_eq "state 5h reset" "2026-01-01T15:00:00Z" "$st_five_reset"
 assert_eq "state 7d percent" "55" "$st_week"
 assert_eq "state 7d reset" "2026-01-08T00:00:00Z" "$st_week_reset"
 assert_eq "state tagged X (push)" "X" "$st_source"
-assert_eq "state observed_at matches the log row" "1767261605" "$st_observed"
+assert_eq "state observed_at matches the log row's precise timestamp" "1767261605" "$st_observed"
 
 section "same transcript again -> the log has no dedup any more, appends regardless"
 run_push "$TRANSCRIPT" 42 "2026-01-01T15:00:00Z" 55 "2026-01-08T00:00:00Z"
@@ -102,8 +123,8 @@ IFS="$SEP" read -r st_five _ _ _ _ _ < "$STATE"
 assert_eq "state file 5h percent unchanged (99 was not newer)" "43" "$st_five"
 
 section "empty resets_at fields become JSON null, not empty strings"
+reset
 write_transcript '{"type":"assistant","timestamp":"2026-02-01T00:00:00.000Z"}'
-rm -f "$LOG" "$STATE"
 run_push "$TRANSCRIPT" 10 "" 20 ""
 row="$(cat "$LOG")"
 assert_contains "five_hour_resets_at is null" "$row" '"five_hour_resets_at":null'

@@ -207,9 +207,9 @@ statusline_touch_heartbeat() {
 # Overlays cached FS-separated quota values onto the caller's own
 # five_pct/five_reset/week_pct/week_reset/quota_source (same implicit-variable
 # convention as statusline_common_segments in format.sh) - only overlays
-# fields the cache has a non-empty value for, so a partially-seeded cache
+# fields the cache has a non-empty value for, so a not-yet-populated cache
 # can't blank out a caller's already-live value. Field 5 is an origin tag
-# (P/X/S - see statusline_write_quota_if_newer below), field 6 is the
+# (P/X - see statusline_write_quota_if_newer below), field 6 is the
 # observed_at epoch that write-time freshness compare used - read-only
 # bookkeeping here, never displayed, hence the throwaway `_`.
 statusline_overlay_quota_cache() {
@@ -227,11 +227,13 @@ statusline_overlay_quota_cache() {
 
 # The one write path for a provider's small "latest known quota" state file
 # (state/quota/claude, and in principle any other provider that adopts the
-# same format). Every writer - a live statusline push, the scheduled poller,
-# the degenerate first-ever seed - calls this instead of writing the file
-# directly, comparing on observed_at (epoch seconds the reading was actually
-# true, NOT write time) so whichever producer has the genuinely freshest
-# reading wins regardless of write order or which mechanism produced it.
+# same format). Every writer - a live statusline push, the scheduled poller -
+# calls this instead of writing the file directly, comparing on observed_at
+# (epoch seconds the reading was actually true, NOT write time) so whichever
+# producer has the genuinely freshest reading wins regardless of write order
+# or which mechanism produced it. The state file starts out simply absent;
+# the first writer to run - whichever happens first - creates it, no
+# separate seed/placeholder step needed.
 # No locking: two writers racing on the exact same instant could in theory
 # clobber each other's compare-then-write with a slightly-less-fresh value,
 # but atomic mv still guarantees no torn/corrupt file, and the next write

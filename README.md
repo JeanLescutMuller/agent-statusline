@@ -81,7 +81,7 @@ flowchart TB
         hbC[("heartbeat/claude")]
         hbX[("heartbeat/codex")]
         ccC[("quota/claude
-        latest reading only, tagged P/X/S")]
+        latest reading only, tagged P/X")]
         ccX[("quota/codex
         60s cache")]
         ccOther[("system/metrics, git/&lt;cwd&gt;/*, static/*
@@ -123,8 +123,7 @@ flowchart TB
     provclaude -->|"rate_limits on stdin"| pushscript
     pushscript -->|"appends, unconditionally"| claudelog
     pushscript -->|"writes if newer, tag X"| ccC
-    provclaude -->|"seeds if newer, tag S"| ccC
-    provclaude -.->|"no rate_limits yet: reads"| ccC
+    provclaude -->|"always reads back for display"| ccC
 
     provcodex -->|writes payload snapshot| ccX
 
@@ -194,7 +193,7 @@ even though it reads/writes this same runtime's `data/`:
     │   │   ├── claude                    epoch of the last Claude render (see below)
     │   │   └── codex                     epoch of the last Codex render (see below)
     │   ├── quota/
-    │   │   ├── claude                    latest reading only: 5h/7d percent+reset, source tag (P/X/S), observed_at
+    │   │   ├── claude                    latest reading only: 5h/7d percent+reset, source tag (P/X), observed_at
     │   │   └── codex                     5h percent/reset, 7d percent/reset
     │   └── git/cwd/.../
     │       ├── local                     local Git snapshot for that cwd
@@ -241,16 +240,18 @@ hot-path logger independent of another `date` subprocess.
 
 Claude quotas aren't in this table because they don't go through the lazy
 stale-while-revalidate machinery above at all - they're a different, simpler
-mechanism. `providers/claude-statusline-command.sh` prefers the live
-`rate_limits` values already present on every render's stdin payload (no
-cache, no staleness, exactly as fresh as Claude Code's own in-memory quota
-state). For the one case stdin can't cover - a session that hasn't sent its
-first message yet - it falls back to `state/quota/claude`, a single small
-file holding only the latest known reading, kept fresh by direct writes
-(not a scheduled refresh): both `src/statusline/push-claude-quota.sh` and
-`src/quota_polling/poll_claude.py` write to it on every push/poll,
-comparing the reading's own `observed_at` against what's already there and
-writing only if newer - see "Quota tracking" below for the full mechanism.
+mechanism. `providers/claude-statusline-command.sh` always displays
+`state/quota/claude`, a single small file holding only the latest known
+reading - kept fresh by direct writes, not a scheduled refresh: whenever
+stdin has live `rate_limits`, this render pushes them into that file first
+(`src/statusline/push-claude-quota.sh`), and `src/quota_polling/poll_claude.py`
+does the same on its own schedule; both compare the reading's own
+`observed_at` against what's already there and write only if newer. Every
+render then just reads the file back, so it always shows the single
+freshest reading known anywhere on the machine - this session's own, or a
+concurrent session's, or the poller's - rather than each session being
+stuck showing its own possibly-stale last-known value. See "Quota tracking"
+below for the full mechanism.
 
 Codex contributes its latest payload snapshot to the shared provider cache
 because no separate stable local quota endpoint has been established -
@@ -294,30 +295,43 @@ at analysis time if it ever needs to.
 
 ### The "latest known quota" state file
 
-What a brand-new Claude session actually reads for its fallback display -
-`state/quota/claude` (see "Lazy stale-while-revalidate flow" above) - is a
-*different* file from the two history logs, and deliberately not derived
-from them by rescanning at read time (an earlier design did exactly that,
-and broke under real load: the poll reading only lands a few times a day at
-most, and got crowded out of even a generous tail window by the far more
-frequent pushes). Instead, both Claude writers push straight to this one
-small file, whichever has the fresher reading wins:
+`providers/claude-statusline-command.sh` always displays whatever's in
+`state/quota/claude` (see "Lazy stale-while-revalidate flow" above) for
+every render, live rate_limits on stdin or not - there is no separate
+"show my own live value directly" path. That's deliberate: rate_limits on
+stdin is only *that session's* last-known reading, updated solely when that
+session gets a fresh API response, while the 5h/7d quota is account-wide
+and shared across every open session. Three sessions that last talked to
+the API at three different moments used to each show their own frozen
+snapshot - all individually accurate as of their own last message, but
+disagreeing with each other and with the true current usage. Reading back
+one shared file instead means every session converges on whichever reading
+is genuinely freshest within about one render cycle, regardless of which
+session or poller produced it.
+
+That file is also deliberately not derived from the two history logs by
+rescanning at read time (an earlier design did exactly that, and broke
+under real load: the poll reading only lands a few times a day at most, and
+got crowded out of even a generous tail window by the far more frequent
+pushes). Instead, both Claude writers push straight to this one small file,
+whichever has the fresher reading wins:
 
 | Writer | Tag | Compares |
 |---|---|---|
-| `src/statusline/push-claude-quota.sh` | `X` | this push's `observed_at` (transcript-derived) |
+| `src/statusline/push-claude-quota.sh` (every render with live rate_limits) | `X` | this push's `observed_at` - the transcript's last message timestamp when available, else "now" as a best-effort fallback (still a live reading, just without a precise "as of" moment) |
 | `src/quota_polling/poll_claude.py` | `P` | the poll's own `ts` (a live API call, so poll time ≈ observation time) |
-| `providers/claude-statusline-command.sh` (seed) | `S` | always `observed_at=0` - see its own comment for why it can never use "now": render time is always ≥ the same render's push's real `observed_at`, so a seed using "now" would silently outrank its own push's `X` tag every time |
 
-Both real writers call the same compare-then-atomically-overwrite primitive
-- `statusline_write_quota_if_newer` in `src/statusline/cache.sh` (bash side)
+Both writers call the same compare-then-atomically-overwrite primitive -
+`statusline_write_quota_if_newer` in `src/statusline/cache.sh` (bash side)
 and `write_state_if_newer` in `src/quota_polling/_quota_common.py` (Python
 side, same six-field format) - no locking, since a same-instant write race
 only risks a slightly-less-fresh value for one render until the next write
-(from either side) self-corrects. The statusline displays whichever tag
-ends up in the file next to the percentage (`65% (P)`), so which mechanism
-actually produced a given reading is visible at a glance while reading the
-live statusline, not just from the source.
+(from either side) self-corrects. The file starts out simply absent;
+whichever writer runs first creates it, no separate seed/placeholder step
+needed. The statusline displays whichever tag ends up in the file next to
+the percentage (`65% (P)`), so which mechanism actually produced a given
+reading is visible at a glance while reading the live statusline, not just
+from the source.
 
 ## Codex status-line patch
 

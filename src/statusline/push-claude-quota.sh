@@ -1,23 +1,24 @@
 #!/bin/bash
 # Two writes from the same live reading, on every Claude render that has
-# rate_limits on stdin:
-#   1. Append a row to the append-only history,
-#      data/claude-quota-history.jsonl (shared with
-#      src/quota_polling/poll_claude.py, disambiguated by `source`) -
-#      unconditionally, no freshness check. Nothing reads this file live
-#      any more (see statusline_write_quota_if_newer below); it exists
-#      purely as raw material for adhoc_quotas_analysis/'s research
-#      notebook, so there's nothing to protect by deduplicating it and
-#      every guard here was previously in service of a reader that no
-#      longer exists.
-#   2. Update the shared "latest known quota" state file
-#      (state/quota/claude) via statusline_write_quota_if_newer, tagged
-#      "X" (push) - but only if this reading is actually newer than
-#      whatever's there, so a slow/delayed render can't regress a fresher
-#      poll or another session's more recent push. This is what makes a
-#      brand-new session's fallback (no rate_limits yet - see
-#      providers/claude-statusline-command.sh) reflect other concurrently
-#      active sessions immediately, not just the scheduled poller.
+# rate_limits on stdin - this is the *only* way state/quota/claude gets
+# real Claude data (besides src/quota_polling/poll_claude.py's poll, tag
+# P); providers/claude-statusline-command.sh always displays whatever ends
+# up in that file, live render or not, so this write is the entire path to
+# the screen:
+#   1. Append a row to the append-only history, data/claude-quota-history.jsonl
+#      (shared with poll_claude.py, disambiguated by `source`) - only when
+#      the transcript gives a precise observed_at (the last message's own
+#      timestamp - see below); skipped otherwise, since a fabricated
+#      timestamp would degrade the log's research value. Unconditional, no
+#      dedup - nothing reads this file live any more, so there's nothing to
+#      protect by comparing against previous rows.
+#   2. Update state/quota/claude via statusline_write_quota_if_newer, tagged
+#      "X", using that same precise observed_at when available, or "now" as
+#      a best-effort fallback when there's no usable transcript - still a
+#      live reading either way, just without a precise "as of" moment -
+#      but only if this reading is actually newer than whatever's already
+#      there, so a slow/delayed render can't regress a fresher poll or
+#      another session's more recent push.
 #
 # Free: rides `rate_limits`, already present on every render's stdin
 # payload, no network call of its own. See adhoc_quotas_analysis/AGENTS.md's
@@ -39,48 +40,50 @@ source "$script_dir/cache.sh"
 
 transcript_path="${1:-}" five_pct="${2:-}" five_reset="${3:-}"
 week_pct="${4:-}" week_reset="${5:-}"
+now="$(date +%s)"
 
-[ -n "$transcript_path" ] && [ -f "$transcript_path" ] || exit 0
-
-log_file="$HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
+[ -n "$five_pct" ] || exit 0
 
 # Some trailing transcript entries (snapshot/compact bookkeeping) carry no
 # `timestamp` - scan back a few lines for the last one that does. observed_at
 # is when Claude Code's in-memory rate-limit state actually became true (the
-# transcript's own last message timestamp) - not "now": render time and
-# append time are both wrong proxies that would claim freshness the data
-# doesn't have.
-observed_at="$(tail -n 20 "$transcript_path" 2>/dev/null | jq -n -r '
-    def epoch:
-        sub("\\.[0-9]+\\+00:00$"; "Z") | sub("\\+00:00$"; "Z") | sub("\\.[0-9]+Z$"; "Z")
-        | fromdateiso8601;
-    [inputs | select(.timestamp != null) | .timestamp]
-    | if length == 0 then empty else last end
-    | epoch
-' 2>/dev/null)"
-[ -n "$observed_at" ] || exit 0
+# transcript's own last message timestamp) - not "now": render/append time
+# is always later than the reading it's describing, so treating it as the
+# freshness stamp would make every render look newer than the render before
+# it even when nothing changed, drowning out genuinely newer readings.
+observed_at=""
+if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+    observed_at="$(tail -n 20 "$transcript_path" 2>/dev/null | jq -n -r '
+        def epoch:
+            sub("\\.[0-9]+\\+00:00$"; "Z") | sub("\\+00:00$"; "Z") | sub("\\.[0-9]+Z$"; "Z")
+            | fromdateiso8601;
+        [inputs | select(.timestamp != null) | .timestamp]
+        | if length == 0 then empty else last end
+        | epoch
+    ' 2>/dev/null)"
+fi
 
-mkdir -p "$(dirname "$log_file")"
-
-row="$(jq -nc \
-    --argjson ts "$(date +%s)" \
-    --arg iso "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-    --argjson observed_at "$observed_at" \
-    --argjson five_pct "${five_pct:-0}" \
-    --argjson week_pct "${week_pct:-0}" \
-    --arg five_reset "$five_reset" \
-    --arg week_reset "$week_reset" '
-    {ts: $ts, iso: $iso, source: "claude_statusline", observed_at: $observed_at,
-     five_hour_pct: $five_pct, seven_day_pct: $week_pct,
-     five_hour_resets_at: (($five_reset | select(. != "")) // null),
-     seven_day_resets_at: (($week_reset | select(. != "")) // null)}
-' 2>/dev/null)"
-[ -n "$row" ] || exit 0
-
-# A single write() call under 4KB with the file opened O_APPEND is
-# POSIX-atomic across processes - no locking needed even with many
-# concurrent sessions' statuslines appending to this same file.
-printf '%s\n' "$row" >> "$log_file"
+if [ -n "$observed_at" ]; then
+    log_file="$HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
+    mkdir -p "$(dirname "$log_file")"
+    row="$(jq -nc \
+        --argjson ts "$now" \
+        --arg iso "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        --argjson observed_at "$observed_at" \
+        --argjson five_pct "$five_pct" \
+        --argjson week_pct "${week_pct:-0}" \
+        --arg five_reset "$five_reset" \
+        --arg week_reset "$week_reset" '
+        {ts: $ts, iso: $iso, source: "claude_statusline", observed_at: $observed_at,
+         five_hour_pct: $five_pct, seven_day_pct: $week_pct,
+         five_hour_resets_at: (($five_reset | select(. != "")) // null),
+         seven_day_resets_at: (($week_reset | select(. != "")) // null)}
+    ' 2>/dev/null)"
+    # A single write() call under 4KB with the file opened O_APPEND is
+    # POSIX-atomic across processes - no locking needed even with many
+    # concurrent sessions' statuslines appending to this same file.
+    [ -n "$row" ] && printf '%s\n' "$row" >> "$log_file"
+fi
 
 statusline_write_quota_if_newer "$STATUSLINE_STATE_DIR/quota/claude" \
-    "$five_pct" "$five_reset" "$week_pct" "$week_reset" X "$observed_at"
+    "$five_pct" "$five_reset" "$week_pct" "$week_reset" X "${observed_at:-$now}"

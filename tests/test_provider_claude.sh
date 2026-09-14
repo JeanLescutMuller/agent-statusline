@@ -54,8 +54,8 @@ assert_contains "line 2 shows the session id" "$TH_OUT" "session-abc123"
 assert_contains "line 3 shows the context percentage" "$TH_OUT" "42%"
 assert_contains "line 3 shows the 5h percentage" "$TH_OUT" "55%"
 assert_contains "line 3 shows the 7d percentage" "$TH_OUT" "70%"
-assert_contains "5h is tagged live (L) - stdin had rate_limits" "$TH_OUT" "55% (L)"
-assert_contains "7d is tagged live (L) too" "$TH_OUT" "70% (L)"
+assert_contains "5h is tagged X - this render's own push, read back immediately" "$TH_OUT" "55% (X)"
+assert_contains "7d is tagged X too" "$TH_OUT" "70% (X)"
 
 section "full payload outside a git repo"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
@@ -75,31 +75,50 @@ section "quota cache write-through and reuse"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime2.XXXXXX")"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 quota_cache="$STATUSLINE_RUNTIME_DIR/state/quota/claude"
-assert_file_exists "first call seeds the quota cache from the payload" "$quota_cache"
+assert_file_exists "first call creates the state file from the payload's own push" "$quota_cache"
 assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "55"
-assert_contains "the seed write tags itself S (degenerate fallback, not a real poll)" \
-    "$(cat "$quota_cache")" "S"
 assert_file_exists "every render touches the liveness heartbeat src/quota_polling/poll_claude.py polls faster against" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
 
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_contains "a later call with no rate_limits in the payload still shows the cached 5h percent" "$TH_OUT" "55%"
 assert_contains "...and the cached 7d percent" "$TH_OUT" "70%"
-assert_contains "...tagged S, since that cache entry is the seed write above, not a poll" "$TH_OUT" "55% (S)"
+assert_contains "...still tagged X, from the earlier render's push" "$TH_OUT" "55% (X)"
 
-section "a session with a real transcript pushes X; a later idle session sees it via overlay"
+section "concurrent sessions converge on whichever reading is freshest"
+# Reproduces the scenario this design fixes: three "sessions" each with
+# their own live rate_limits (all tagged X, per above) used to each just
+# show their own last-known number - now they all read the same state file
+# back, so whichever pushed most recently wins for everyone, not just for
+# itself.
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime3.XXXXXX")"
-transcript="$TH_HOME/transcript-x.jsonl"
-printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:00.000Z"}' > "$transcript"
-payload="$TH_TMP/payload-x.json"
-sed "s#__CWD__#$plain_dir#" "$FIXTURES/claude-payload.json" \
-    | jq --arg t "$transcript" '. + {transcript_path: $t}' > "$payload"
+quota_cache="$STATUSLINE_RUNTIME_DIR/state/quota/claude"
 
-run_claude "$payload" "$plain_dir"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "own render still shows live (L), push is a side effect" "$TH_OUT" "55% (L)"
+payload_for() {
+    local pct="$1" ts="$2" out="$3" transcript
+    transcript="$TH_TMP/transcript-$pct.jsonl"
+    printf '{"type":"assistant","timestamp":"%s"}\n' "$ts" > "$transcript"
+    sed "s#__CWD__#$plain_dir#" "$FIXTURES/claude-payload.json" \
+        | jq --arg t "$transcript" --argjson p "$pct" \
+            '. + {transcript_path: $t, rate_limits: (.rate_limits + {five_hour: {used_percentage: $p, resets_at: 1788091200}})}' \
+        > "$out"
+}
+
+# Session A's last message was earliest; B's later; C hasn't sent one yet.
+payload_for 24 "2026-01-01T00:00:00.000Z" "$TH_TMP/payload-a.json"
+payload_for 25 "2026-01-01T00:05:00.000Z" "$TH_TMP/payload-b.json"
+
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_contains "session A shows its own 24%" "$TH_OUT" "24% (X)"
+
+run_claude "$TH_TMP/payload-b.json" "$plain_dir"
+assert_contains "session B shows its own, newer 25%" "$TH_OUT" "25% (X)"
 
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_contains "a later idle session's fallback sees the pushed value, tagged X" "$TH_OUT" "55% (X)"
+assert_contains "session C (idle, no rate_limits yet) sees B's newer reading" "$TH_OUT" "25% (X)"
+
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_contains "session A re-renders (still its own stale 24% on stdin) but now shows B's 25% too" \
+    "$TH_OUT" "25% (X)"
 
 harness_summary
