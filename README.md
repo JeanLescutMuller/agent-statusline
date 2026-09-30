@@ -12,6 +12,15 @@ to share the same account data.
 Personal, user-space tool - safe to run on any machine you don't own (no
 root/sudo assumed anywhere, aside from Codex's own install).
 
+## Usage data documentation
+
+Two canonical files, which other projects that read or convert this data (`agent-quota-maximizer`) link to instead of restating them:
+
+- `USAGE_DATA_SOURCES.md` — **what usage data exists upstream**, independent of this repository: every Claude and Codex source (transcripts, status-line stdin, APIs, OpenTelemetry, the ChatGPT backend), each unit (quota percent / tokens / USD) at each granularity, tested live, plus what is not available anywhere.
+- `USAGE_DATA_REFERENCE.md` — **what this repository captures**: which writer records what, when, from which source, into which file, with which shape, and the traps consumers must handle (stale readings and the envelope rule, the `observed_at` DST offset, Codex's fake idle countdown, the poller's failure rate).
+
+The dollar conversions both assume are derived in `adhoc_quotas_analysis/CONCLUSIONS.md`.
+
 ## Usage
 
 ```bash
@@ -342,7 +351,7 @@ above. `install.sh` calls `codex-patch/install-codex-statusline-patch.sh`,
 which:
 
 - Clones `openai/codex` at the exact release commit allowlisted in
-  `codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.153.0;
+  `codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.154.0;
   unknown versions are left unpatched).
 - Checks and applies the shared
   `codex-patch/patches/codex-status-line-command.patch`; almost all custom Rust

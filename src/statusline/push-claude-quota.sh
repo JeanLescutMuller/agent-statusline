@@ -31,15 +31,24 @@
 # every 60s. Always exits 0: a failure here must never break the visible
 # statusline.
 #
+# Percents arrive unrounded (Claude Code sends floats): the history row
+# keeps them as-is, the state file gets them rounded, since everything that
+# reads it for display does integer arithmetic. session_cost_usd is the
+# payload's cumulative per-session cost.total_cost_usd, logged only (never
+# in the state file) - successive rows for one session_id give its spend
+# over time.
+#
 # Usage: push-claude-quota.sh <transcript_path> <five_pct>
 #          <five_reset_iso> <week_pct> <week_reset_iso>
+#          [session_id] [session_cost_usd]
 set -uo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/cache.sh"
 
 transcript_path="${1:-}" five_pct="${2:-}" five_reset="${3:-}"
-week_pct="${4:-}" week_reset="${5:-}"
+week_pct="${4:-}" week_reset="${5:-}" session_id="${6:-}"
+session_cost_usd="${7:-}"
 now="$(date +%s)"
 
 [ -n "$five_pct" ] || exit 0
@@ -51,12 +60,25 @@ now="$(date +%s)"
 # is always later than the reading it's describing, so treating it as the
 # freshness stamp would make every render look newer than the render before
 # it even when nothing changed, drowning out genuinely newer readings.
+#
+# The UTC timestamp is converted by plain calendar arithmetic (Howard
+# Hinnant's days_from_civil), not jq's fromdateiso8601: jq 1.6 on macOS goes
+# through the local timezone and returns an epoch one hour too late whenever
+# that zone is in daylight-saving time. Only UTC timestamps ("Z" or "+00:00",
+# optional fractional seconds) are accepted; anything else yields no
+# observed_at, same as a transcript with no timestamp.
 observed_at=""
 if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
     observed_at="$(tail -n 20 "$transcript_path" 2>/dev/null | jq -n -r '
         def epoch:
-            sub("\\.[0-9]+\\+00:00$"; "Z") | sub("\\+00:00$"; "Z") | sub("\\.[0-9]+Z$"; "Z")
-            | fromdateiso8601;
+            capture("^(?<y>[0-9]{4})-(?<mo>[0-9]{2})-(?<d>[0-9]{2})T(?<h>[0-9]{2}):(?<mi>[0-9]{2}):(?<s>[0-9]{2})(\\.[0-9]+)?(Z|\\+00:00)$")
+            | map_values(tonumber)
+            | (if .mo <= 2 then .y - 1 else .y end) as $y
+            | (($y / 400) | floor) as $era
+            | ($y - $era * 400) as $yoe
+            | (((153 * (if .mo > 2 then .mo - 3 else .mo + 9 end) + 2) / 5 | floor) + .d - 1) as $doy
+            | ($yoe * 365 + (($yoe / 4) | floor) - (($yoe / 100) | floor) + $doy) as $doe
+            | ($era * 146097 + $doe - 719468) * 86400 + .h * 3600 + .mi * 60 + .s;
         [inputs | select(.timestamp != null) | .timestamp]
         | if length == 0 then empty else last end
         | epoch
@@ -73,11 +95,16 @@ if [ -n "$observed_at" ]; then
         --argjson five_pct "$five_pct" \
         --argjson week_pct "${week_pct:-0}" \
         --arg five_reset "$five_reset" \
-        --arg week_reset "$week_reset" '
+        --arg week_reset "$week_reset" \
+        --arg session_id "$session_id" \
+        --arg cost "$session_cost_usd" '
+        def num_or_null: if . == "" then null else (tonumber? // null) end;
         {ts: $ts, iso: $iso, source: "claude_statusline", observed_at: $observed_at,
          five_hour_pct: $five_pct, seven_day_pct: $week_pct,
          five_hour_resets_at: (($five_reset | select(. != "")) // null),
-         seven_day_resets_at: (($week_reset | select(. != "")) // null)}
+         seven_day_resets_at: (($week_reset | select(. != "")) // null),
+         session_id: (($session_id | select(. != "")) // null),
+         session_cost_usd: ($cost | num_or_null)}
     ' 2>/dev/null)"
     # A single write() call under 4KB with the file opened O_APPEND is
     # POSIX-atomic across processes - no locking needed even with many
@@ -85,5 +112,7 @@ if [ -n "$observed_at" ]; then
     [ -n "$row" ] && printf '%s\n' "$row" >> "$log_file"
 fi
 
+five_pct_int="$(jq -n --argjson v "$five_pct" '$v | round' 2>/dev/null)" || exit 0
+week_pct_int="$(jq -n --argjson v "${week_pct:-0}" '$v | round' 2>/dev/null)" || exit 0
 statusline_write_quota_if_newer "$STATUSLINE_STATE_DIR/quota/claude" \
-    "$five_pct" "$five_reset" "$week_pct" "$week_reset" X "${observed_at:-$now}"
+    "$five_pct_int" "$five_reset" "$week_pct_int" "$week_reset" X "${observed_at:-$now}"

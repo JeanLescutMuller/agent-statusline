@@ -130,4 +130,41 @@ row="$(cat "$LOG")"
 assert_contains "five_hour_resets_at is null" "$row" '"five_hour_resets_at":null'
 assert_contains "seven_day_resets_at is null" "$row" '"seven_day_resets_at":null'
 
+section "observed_at is exact UTC even when the local zone is in daylight-saving time"
+# Regression test: jq 1.6's fromdateiso8601 on macOS returned an epoch one
+# hour too late for a summer timestamp under a DST zone such as Europe/Paris.
+reset
+write_transcript '{"type":"assistant","timestamp":"2026-07-01T10:00:00.250Z"}'
+TZ=Europe/Paris run_push "$TRANSCRIPT" 10 "" 20 ""
+assert_contains "summer timestamp under Europe/Paris" "$(cat "$LOG")" '"observed_at":1782900000'
+reset
+write_transcript '{"type":"assistant","timestamp":"2026-07-01T10:00:00+00:00"}'
+TZ=America/New_York run_push "$TRANSCRIPT" 10 "" 20 ""
+assert_contains "+00:00 suffix under America/New_York" "$(cat "$LOG")" '"observed_at":1782900000'
+
+section "float percents -> logged unrounded, state file gets them rounded"
+reset
+write_transcript '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}'
+run_push "$TRANSCRIPT" 23.5 "" 41.2 ""
+assert_status "exits 0" 0 "$TH_STATUS"
+row="$(cat "$LOG")"
+assert_contains "five-hour percent keeps its fraction" "$row" '"five_hour_pct":23.5'
+assert_contains "seven-day percent keeps its fraction" "$row" '"seven_day_pct":41.2'
+IFS="$SEP" read -r st_five _ st_week _ _ _ < "$STATE"
+assert_eq "state 5h percent rounded" "24" "$st_five"
+assert_eq "state 7d percent rounded" "41" "$st_week"
+
+section "session cost -> logged with session_id, absent ones become null"
+reset
+write_transcript '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}'
+run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.01234
+row="$(cat "$LOG")"
+assert_contains "session_id logged" "$row" '"session_id":"sess-1"'
+assert_contains "cumulative session cost logged" "$row" '"session_cost_usd":0.01234'
+reset
+run_push "$TRANSCRIPT" 10 "" 20 ""
+row="$(cat "$LOG")"
+assert_contains "no session_id -> null" "$row" '"session_id":null'
+assert_contains "no cost -> null" "$row" '"session_cost_usd":null'
+
 harness_summary

@@ -22,12 +22,15 @@ done < <(jq -j '
         (.cwd | text("?")),
         (.session_id | text("")),
         ((.context_window.used_percentage // 0) | round | tostring),
-        ((.rate_limits.five_hour.used_percentage // 0) | round | tostring),
+        ((.rate_limits.five_hour.used_percentage // 0) | tostring),
         (.rate_limits.five_hour.resets_at | text("")),
-        ((.rate_limits.seven_day.used_percentage // 0) | round | tostring),
+        ((.rate_limits.seven_day.used_percentage // 0) | tostring),
         (.rate_limits.seven_day.resets_at | text("")),
         (.transcript_path | text("")),
-        ((.rate_limits.five_hour != null or .rate_limits.seven_day != null) | tostring)
+        ((.rate_limits.five_hour != null or .rate_limits.seven_day != null) | tostring),
+        (.cost.total_cost_usd | text("")),
+        ((.rate_limits.five_hour.used_percentage // 0) | round | tostring),
+        ((.rate_limits.seven_day.used_percentage // 0) | round | tostring)
     ] | .[] | ., "\u0000"
 ')
 
@@ -36,19 +39,25 @@ effort="${values[1]:-}"
 cwd="${values[2]:-?}"
 session_id="${values[3]:-}"
 context_pct="${values[4]:-0}"
-five_pct="${values[5]:-0}"
+five_pct_raw="${values[5]:-0}"
 five_reset="${values[6]:-}"
-week_pct="${values[7]:-0}"
+week_pct_raw="${values[7]:-0}"
 week_reset="${values[8]:-}"
 transcript_path="${values[9]:-}"
 has_rate_limits="${values[10]:-false}"
+session_cost_usd="${values[11]:-}"
+five_pct="${values[12]:-0}"
+week_pct="${values[13]:-0}"
 
 # Push this render's own reading into the shared state file before display
 # (see src/statusline/push-claude-quota.sh - tags it X). Skipped when stdin
-# has no rate_limits at all (session hasn't sent a message yet).
+# has no rate_limits at all (session hasn't sent a message yet). The
+# percents are passed unrounded so the history log keeps their float
+# precision; push-claude-quota.sh rounds only what goes into the state file.
 if [ "$has_rate_limits" = "true" ]; then
     bash "$lib_dir/push-claude-quota.sh" \
-        "$transcript_path" "$five_pct" "$five_reset" "$week_pct" "$week_reset" \
+        "$transcript_path" "$five_pct_raw" "$five_reset" "$week_pct_raw" "$week_reset" \
+        "$session_id" "$session_cost_usd" \
         >/dev/null 2>&1 || true
 fi
 

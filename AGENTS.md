@@ -18,6 +18,9 @@ agent-statusline/
 ├── install.sh                    # deploy onto a bare machine: shared lib, adapters, src/quota_polling/ + adhoc_quotas_analysis/ + their LaunchAgent; drives codex-patch/ conditionally. No migration logic - see uninstall.sh
 ├── uninstall.sh                  # removes everything install.sh deploys; preserves data/ and codex-patch/; flags anything else left under ~/opt/agent-statusline as an orphan
 ├── utils.sh                      # shared echo/color helpers for install.sh, uninstall.sh, and the patch script
+├── USAGE_DATA_SOURCES.md         # CANONICAL: what usage data exists upstream, in which unit, at which granularity, for both agents.
+├── USAGE_DATA_REFERENCE.md       # CANONICAL: what this repo captures, how, when, and where it lands.
+│                                 # Other projects link to these rather than restating them. Keep them tested and dated.
 ├── providers/                    # statusline architecture: Claude/Codex payload adapters, call into src/statusline/
 ├── src/
 │   ├── statusline/                # statusline architecture: shared cache/format lib + refresh scripts
@@ -30,6 +33,9 @@ agent-statusline/
 │                                 # full git history preserved under this prefix (see its own AGENTS.md)
 │   ├── split_quota_log.py        # one-time, idempotent log-split migration, run by hand only if you still have an old combined data/quota-log.jsonl
 │   ├── recompute_codex_events.py # not scheduled, run by hand (Claude side is now inline in analysis.ipynb's own cells)
+│   ├── window_gaps.py            # read-only, run by hand: 5h/7d window gap analysis behind CONCLUSIONS.md
+│   ├── quota_model.py            # read-only, run by hand: %/token/USD conversions + Codex window timing behind CONCLUSIONS.md
+│   ├── CONCLUSIONS.md            # established findings with evidence and caveats (dated entries)
 │   ├── analysis.ipynb            # research notebook - recomputes claude-token-events.jsonl itself, top of the notebook
 │   └── AGENTS.md                 # deep-dive: investigation, findings, gotchas - not force-merged into this file
 ├── codex-patch/                   # Codex patch: build-time, one-off, unrelated to what runs on a render
@@ -69,7 +75,7 @@ final result print to the terminal. Never drive this build by hand-running
 `cargo`/`git` steps or by polling compiler output through the model.
 
 Supported Codex versions and their exact upstream release commits live in
-`codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.153.0). The
+`codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.154.0). The
 functional change is one shared patch, with almost all custom Rust isolated in
 its own module. Before adding a release to the allowlist, check that the shared
 patch applies cleanly to that exact tag and compile it; only re-derive the patch
@@ -123,11 +129,16 @@ runs through **two different kinds of file** that are easy to conflate:
   writers — nothing reads this live any more (see below), it exists purely
   as raw material for `adhoc_quotas_analysis/analysis.ipynb`'s research.
 - `state/quota/claude` / `state/quota/codex` — a single small file per
-  provider holding only the *latest known reading*, six FS-delimited fields
-  (`five_pct/five_reset/week_pct/week_reset/source/observed_at`, see
-  `src/statusline/cache.sh`'s `statusline_write_quota_if_newer` and its
+  provider holding only the *latest known reading*. The Claude file has six
+  FS-delimited fields (`five_pct/five_reset/week_pct/week_reset/source/observed_at`,
+  see `src/statusline/cache.sh`'s `statusline_write_quota_if_newer` and its
   Python mirror `src/quota_polling/_quota_common.py`'s
-  `write_state_if_newer`). `providers/claude-statusline-command.sh` always
+  `write_state_if_newer`). The Codex file has only four
+  (`five_pct/five_reset/week_pct/week_reset`, resets as the TUI's display
+  strings, not epochs), written solely by `providers/codex-statusline-command.sh`
+  through `statusline_write_values_if_stale` with a 60s TTL tracked in a
+  `state/quota/codex.timestamp` sidecar - no `source`, no `observed_at`, no
+  freshness comparison. `providers/claude-statusline-command.sh` always
   displays whatever's in this file - not a fallback for the one case stdin
   can't cover, the *only* display path, live rate_limits on stdin or not
   (see that file's own comment for why: rate_limits on stdin is only

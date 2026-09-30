@@ -37,11 +37,12 @@ pages 1/2/3 as they come up.
 | `harness.sh` | The assert helpers + fixture/isolation utilities every test file sources |
 | `test_format.sh` | `src/statusline/format.sh` - pure functions |
 | `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh/write, quota state-file writer/overlay, static read, log rotation |
+| `test_poll_claude.sh` | `src/quota_polling/poll_claude.py`'s `fetch_usage` error handling - every transport failure (including `RemoteDisconnected`) becomes an error row instead of crashing the run; `urlopen` monkeypatched, no network |
 | `test_quota_common.sh` | `src/quota_polling/_quota_common.py`'s `write_state_if_newer` - the Python-side mirror of `cache.sh`'s quota state-file writer, cross-checked for format agreement |
 | `test_refresh_git_local.sh` | `src/statusline/refresh-git-local.sh` against real temp repos |
 | `test_refresh_git_remote.sh` | `src/statusline/refresh-git-remote.sh` against a real local bare remote |
 | `test_refresh_metrics.sh` | `src/statusline/refresh-metrics.sh` on the real host |
-| `test_push_claude_quota.sh` | `src/statusline/push-claude-quota.sh` - history-log append (now unconditional) and the `state/quota/claude` freshness-compared write (tag `X`) |
+| `test_push_claude_quota.sh` | `src/statusline/push-claude-quota.sh` - history-log append (now unconditional, unrounded percents, session cost) and the `state/quota/claude` freshness-compared write (tag `X`) |
 | `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the P/X source-tag overlay chain and cross-session convergence |
 | `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |
 | `test_install.sh` | `install.sh` - idempotency, Codex-absent skip, the real TOML-merge heredoc |

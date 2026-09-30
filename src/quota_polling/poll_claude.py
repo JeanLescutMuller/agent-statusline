@@ -163,6 +163,13 @@ def fetch_usage(token: str) -> tuple[dict | None, dict | None, dict | None]:
         # 200 OK but the body isn't JSON - e.g. a captive portal's login page.
         return None, None, {"stage": "parse", "type": "JSONDecodeError",
                             "detail": exc.msg}
+    except OSError as exc:
+        # Transport failures urllib doesn't wrap in URLError - e.g.
+        # http.client.RemoteDisconnected when the server closes the
+        # connection mid-request. Before this, they crashed the run and left
+        # no row at all (7 times by 2026-09-29, see logs/quota-poll.err).
+        return None, None, {"stage": "network", "type": type(exc).__name__,
+                            "detail": str(exc)}
 
 
 def _epoch(iso: str | None) -> str:
