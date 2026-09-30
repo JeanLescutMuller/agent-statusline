@@ -38,6 +38,7 @@ source "$SCRIPT_DIR/utils.sh"
 RUNTIME="$HOME/opt/agent-statusline"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 QUOTA_LABEL="com.jeanlescut.agent-statusline"
+OTEL_LABEL="com.jeanlescut.agent-statusline.otel"
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN} agent-statusline uninstall${NC}"
@@ -52,6 +53,22 @@ if [ -f "$LAUNCH_AGENTS/$QUOTA_LABEL.plist" ] || [ -f "$RUNTIME/$QUOTA_LABEL.pli
 else
     ok "LaunchAgent already absent"
 fi
+
+step "telemetry receiver LaunchAgent"
+if [ -f "$LAUNCH_AGENTS/$OTEL_LABEL.plist" ] || [ -f "$RUNTIME/$OTEL_LABEL.plist" ]; then
+    [ -n "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ] || \
+        launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENTS/$OTEL_LABEL.plist" 2>/dev/null || true
+    rm -f "$LAUNCH_AGENTS/$OTEL_LABEL.plist"
+    installed "unloaded and removed the LaunchAgent"
+else
+    ok "LaunchAgent already absent"
+fi
+
+step "claude telemetry settings"
+case "$(python3 "$SCRIPT_DIR/src/telemetry/merge_claude_env.py" unset)" in
+    changed) installed "removed the telemetry env vars from ~/.claude/settings.json" ;;
+    *) ok "telemetry env vars already absent" ;;
+esac
 
 step "provider adapters"
 for target in "$HOME/.claude/statusline-command.sh" "$HOME/.codex/statusline-command.sh"; do
@@ -83,7 +100,7 @@ if [ -d "$RUNTIME" ]; then
             sleep 0.5
         done
     done
-    rm -f "$RUNTIME/$QUOTA_LABEL.plist"
+    rm -f "$RUNTIME/$QUOTA_LABEL.plist" "$RUNTIME/$OTEL_LABEL.plist"
     installed "removed deployed code and cache/log/lock state"
     # rmdir only succeeds on an empty directory - an install that never
     # actually collected data (or never built the Codex patch) leaves

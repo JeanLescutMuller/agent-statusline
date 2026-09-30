@@ -37,6 +37,7 @@ pages 1/2/3 as they come up.
 | `harness.sh` | The assert helpers + fixture/isolation utilities every test file sources |
 | `test_format.sh` | `src/statusline/format.sh` - pure functions |
 | `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh/write, quota state-file writer/overlay, static read, log rotation |
+| `test_otlp_receiver.sh` | `src/telemetry/otlp_receiver.py` on a free local port: usage events kept and flattened, prompt/tool events dropped, protobuf / malformed / metrics requests answered without writing, localhost-only bind |
 | `test_poll_codex_plan_history.sh` | `src/quota_polling/poll_codex_plan_history.py` - the raw row it logs, its 24h / 1h-retry cadence, error rows (HTTP, disconnect, missing auth), and that the bearer token never reaches the log; `urlopen` monkeypatched, fake `auth.json` |
 | `test_poll_claude.sh` | `src/quota_polling/poll_claude.py`'s `fetch_usage` error handling - every transport failure (including `RemoteDisconnected`) becomes an error row instead of crashing the run; `urlopen` monkeypatched, no network |
 | `test_quota_common.sh` | `src/quota_polling/_quota_common.py`'s `write_state_if_newer` - the Python-side mirror of `cache.sh`'s quota state-file writer, cross-checked for format agreement |

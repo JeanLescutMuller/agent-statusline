@@ -25,6 +25,7 @@ All data lives under `~/opt/agent-statusline/` (the deployed runtime; the code l
 | **Claude poller** — `src/quota_polling/poll_claude.py` | LaunchAgent, 60 s tick, via `poll_all.py` | `GET /api/oauth/usage` (Sources §3.5) | Claude log (`source: "claude"`) + `state/quota/claude` (tag `P`) |
 | **Codex poller** — `src/quota_polling/poll_codex.py` | Same LaunchAgent tick | app-server `account/rateLimits/read` + `account/usage/read` (Sources §4.3) | Codex log (`source: "codex"`) |
 | **Codex plan-history poller** — `src/quota_polling/poll_codex_plan_history.py` | Same LaunchAgent tick | ChatGPT backend `plan_limit_history?days=7` (Sources §4.4) | Codex log (`source: "codex_plan_limit_history"`) + `state/poll/codex_plan_limit_history` (last attempt) |
+| **Telemetry receiver** — `src/telemetry/otlp_receiver.py` | Its own LaunchAgent, always running (`KeepAlive`); Claude Code pushes to it | Claude Code's OpenTelemetry events (Sources §3.7) | `data/claude-telemetry.jsonl` (§9) |
 | **Codex status line** — `providers/codex-statusline-command.sh` | Every render of the patched Codex TUI | Codex stdin, provided by `codex-patch/` | `state/quota/codex` only, at most once per 60 s |
 
 ### 1.2 What each writer captures, by unit
@@ -34,6 +35,7 @@ All data lives under `~/opt/agent-statusline/` (the deployed runtime; the code l
 | Claude push | ✅ 5h + 7d, account-wide, whole numbers | ❌ (already exact in transcripts, Sources §3.4); prompt-cache statistics per session from 2026-09-30 | ✅ session cumulative, all models combined, list price — from the first deploy after 2026-09-29 |
 | Claude poller | ✅ 5h + 7d, account-wide, whole numbers, full raw response | ❌ (the endpoint has none) | ❌ (`used_dollars` always `null`) |
 | Codex poller | ✅ 5h + 7d, account-wide, whole numbers, full raw response | ✅ account-wide daily buckets + lifetime total | ❌ |
+| Telemetry receiver | ❌ | ✅ **per API request**, per model, with `query_source` — including the requests transcripts never record — from 2026-09-30 | ✅ per request, list price |
 | Codex plan-history poller | ✅ finished 5h + 7d windows of the last 7 days, **fractional** (basis points), with their real start and end, full raw response — from 2026-09-30 | ❌ | ❌ |
 
 ### 1.3 When each writer actually writes
@@ -43,6 +45,7 @@ All data lives under `~/opt/agent-statusline/` (the deployed runtime; the code l
 | Claude push | The render's stdin has `rate_limits` **and** the transcript's last lines give a timestamp for `observed_at`. No dedup: every such render adds a row. | No `rate_limits` on stdin (non-subscriber, or a window just expired); no usable transcript timestamp — the state file is then still updated, with `observed_at` = now |
 | Claude poller | Every tick while any Claude status line rendered in the last 90 s; otherwise when the last row is ≥ 5 min old. Errors are logged as rows too. | Mac asleep (launchd fires once on wake) |
 | Codex poller | Every tick while a Codex status line rendered in the last 90 s; otherwise when the last row is ≥ 5 min old | **Any Codex session file changed in the last 5 min** — the session file is then the fresher source (Sources §4.1); Mac asleep |
+| Telemetry receiver | Whenever a Claude session started after the install sends a batch (every few seconds while requests happen), interactive **and** `claude -p` | Receiver down (Claude Code drops the batch, no disk buffer); sessions started before the install |
 | Codex plan-history poller | 24 h after its last successful attempt, 1 h after a failed one. Errors are logged as rows. | Mac asleep; independent of the Codex poller's skip rules |
 
 Coverage that follows from this:
@@ -52,7 +55,7 @@ Coverage that follows from this:
 | Interactive session, messages flowing | Push, every render | Nothing in our log — the session file has it |
 | Session open, no message sent yet | Push (stdin has `rate_limits` from startup, Sources §3.1) | Poller, every 60 s |
 | No status line anywhere | Poller, every 5 min | Poller, every 5 min |
-| Headless `claude -p` / `codex exec` | Only through the next reading's meter movement | Same |
+| Headless `claude -p` / `codex exec` | Per-request tokens and $ via telemetry; quota only through the next reading's meter movement | Only through the next reading's meter movement |
 | Usage on other machines / clients | Next reading's meter movement | Next reading, plus `dailyUsageBuckets` |
 
 ---
@@ -221,6 +224,7 @@ Both logs have changed shape (§2.2's older formats, §2.1's added fields). Read
 | 2026-09-30 | Claude poller catches every `OSError` | Server disconnects become `network` error rows instead of silent gaps |
 | 2026-09-30 | Push adds the raw `prompt_cache` object | Session cache statistics and miss diagnostics, persisted nowhere else |
 | 2026-09-30 | New Codex plan-history poller | Fractional per-window history and real window ends, daily |
+| 2026-09-30 | Telemetry receiver + `env` keys in `~/.claude/settings.json` | Per-request Claude usage, including requests absent from transcripts, for sessions started after the install |
 | 2026-09-30 | Push token fields `session_input_tokens` / `session_output_tokens` removed before ever being deployed | They were mislabelled: the source field is context size, not a session total (Sources §3.1) |
 
 ---
@@ -231,7 +235,6 @@ From Sources §2, the data that exists nowhere else and that we do not record ye
 
 | Data | Source | Why it matters |
 |---|---|---|
-| **Claude per-request $ and tokens, including requests absent from transcripts** | OpenTelemetry (Sources §3.7) | Transcripts miss ~17% of spend in the one session tested (Sources §3.4) |
 | Codex usage per day × model × client, relative | Backend analytics (Sources §4.4) | The only per-client split; relative only |
 | Claude quota status beyond the percent (`status`, `representative-claim`, overage) | `/v1/messages` headers (Sources §3.6) | Only reachable through a billed request of our own |
 
@@ -250,3 +253,43 @@ Deliberately not captured because it already persists elsewhere: Claude per-mess
 | Writer behaviour | `bash tests/run.sh`; `tests/test_push_claude_quota.sh` covers the push path |
 
 When any of this changes, update this file and its "Last verified" line.
+
+---
+
+## 9. `data/claude-telemetry.jsonl`
+
+One row per Claude API request (and per API error / refusal / exhausted retry), from 2026-09-30. Written by `src/telemetry/otlp_receiver.py`, a local receiver on `127.0.0.1:4318` run by the `com.jeanlescut.agent-statusline.otel` LaunchAgent. Nothing polls: Claude Code sends the events itself, because `install.sh` adds these keys to the `env` object of `~/.claude/settings.json` (`src/telemetry/claude_telemetry_env.json`; `uninstall.sh` removes them again):
+
+```text
+CLAUDE_CODE_ENABLE_TELEMETRY=1            OTEL_LOGS_EXPORTER=otlp      OTEL_METRICS_EXPORTER=none
+OTEL_EXPORTER_OTLP_PROTOCOL=http/json     OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+```
+
+Only sessions started after those keys were written send events. If the receiver is down, Claude Code drops the batch; nothing is buffered on disk.
+
+```json
+{"received_at": 1790773236, "event": "api_request", "time_unix_nano": 1790773229123000000,
+ "attributes": {"model": "claude-haiku-4-5-20251001", "query_source": "generate_session_title",
+                "input_tokens": 897, "output_tokens": 9, "cache_read_tokens": 0, "cache_creation_tokens": 0,
+                "cost_usd": 0.000942, "cost_usd_micros": 942, "duration_ms": ..., "ttft_ms": ..., "speed": "normal",
+                "request_id": "req_...", "client_request_id": "...", "session.id": "8b301a30-...", "prompt.id": "...",
+                "event.sequence": ..., "event.timestamp": "...", "terminal.type": "...",
+                "organization.id": "...", "user.account_uuid": "...", "user.email": "...", "user.id": "..."},
+ "resource": {"service.name": "claude-code", "service.version": "2.1.284", "os.type": "...", "os.version": "...", "host.arch": "..."}}
+```
+
+| Field | Unit | Granularity | Meaning |
+|---|---|---|---|
+| `event` | — | — | `api_request`, `api_error`, `api_refusal` or `api_retries_exhausted`. Every other telemetry event (prompts, tools, hooks) is dropped on arrival and never written |
+| `attributes.*_tokens` | tokens | **Per request** | That request alone (a delta). `cache_creation_tokens` is not split into 5m / 1h |
+| `attributes.cost_usd` | USD, list price | Per request | Claude Code's own figure; `cost_usd_micros` is the same as an integer |
+| `attributes.query_source` | — | Per request | What the request was for. Seen: `repl_main_thread` (the conversation), `generate_session_title`, `prompt_suggestion`, `sdk` (`claude -p`) |
+| `attributes.session.id` | — | Per session | Joins to the transcript's file name and to push rows' `session_id` |
+| `attributes.request_id` | — | Per request | Joins to the transcript's `requestId` for the requests the transcript has |
+| `time_unix_nano`, `received_at` | ns / s epoch | — | When the event was recorded, and when the receiver wrote it |
+| `resource.*` | — | Per process | Claude Code version and host |
+
+What it shows that nothing else does **[verified 2026-09-30, one interactive session]**: the four `api_request` events summed to exactly the session's `cost-state` (1,267 / 286 / 94,492 / 11,946 tokens, $0.0360382), while the transcript held only the two `repl_main_thread` requests — `generate_session_title` and `prompt_suggestion` exist only here. A headless call's single event matched its `-p` result to the dollar ($0.0210743).
+
+Attribution attributes include the account's `user.email`; the file stays local, like everything else under `data/`.
+

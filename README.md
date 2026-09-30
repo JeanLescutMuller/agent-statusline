@@ -21,6 +21,8 @@ Two canonical files, which other projects that read or convert this data (`agent
 
 The dollar conversions both assume are derived in `adhoc_quotas_analysis/CONCLUSIONS.md`.
 
+`install.sh` also turns on Claude Code's OpenTelemetry export by adding a few keys to the `env` object of `~/.claude/settings.json` (only those keys; `uninstall.sh` removes them), and runs a local receiver on `127.0.0.1:4318` that writes per-request usage events to `data/claude-telemetry.jsonl` — see `USAGE_DATA_REFERENCE.md` §9.
+
 ## Usage
 
 ```bash

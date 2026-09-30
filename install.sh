@@ -93,6 +93,41 @@ if [ -z "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ]; then
     launchctl bootstrap "gui/$(id -u)" "$QUOTA_LINK_PLIST"
 fi
 
+step "telemetry receiver"
+# Long-running local OTLP receiver that Claude Code pushes its per-request
+# usage events to (src/telemetry/otlp_receiver.py). Only the receiver is
+# deployed; merge_claude_env.py and its JSON run from the repo.
+mkdir -p "$RUNTIME/src/telemetry"
+_deploy "$SCRIPT_DIR/src/telemetry/otlp_receiver.py" "$RUNTIME/src/telemetry/otlp_receiver.py"
+OTEL_LABEL="com.jeanlescut.agent-statusline.otel"
+OTEL_REAL_PLIST="$RUNTIME/$OTEL_LABEL.plist"
+OTEL_LINK_PLIST="$LAUNCH_AGENTS/$OTEL_LABEL.plist"
+OTEL_PLIST_TMP="$(mktemp)"
+sed -e "s#__PYTHON3__#$PYTHON3#g" -e "s#__RUNTIME__#$RUNTIME#g" \
+    "$SCRIPT_DIR/src/telemetry/$OTEL_LABEL.plist.template" > "$OTEL_PLIST_TMP"
+if [ -f "$OTEL_REAL_PLIST" ] && diff -q "$OTEL_PLIST_TMP" "$OTEL_REAL_PLIST" >/dev/null 2>&1; then
+    rm -f "$OTEL_PLIST_TMP"
+    ok "telemetry receiver LaunchAgent"
+else
+    mv "$OTEL_PLIST_TMP" "$OTEL_REAL_PLIST"
+    installed "telemetry receiver LaunchAgent (listens on 127.0.0.1:4318)"
+fi
+ln -sf "$OTEL_REAL_PLIST" "$OTEL_LINK_PLIST"
+if [ -z "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ]; then
+    # Always restart, so a redeployed otlp_receiver.py takes effect.
+    launchctl bootout "gui/$(id -u)" "$OTEL_LINK_PLIST" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$OTEL_LINK_PLIST"
+fi
+
+step "claude telemetry settings"
+# Only the keys in src/telemetry/claude_telemetry_env.json, inside `env`.
+# Takes effect for Claude sessions started after this.
+case "$("$PYTHON3" "$SCRIPT_DIR/src/telemetry/merge_claude_env.py" set)" in
+    changed) installed "telemetry env vars in ~/.claude/settings.json (new sessions only)" ;;
+    unchanged) ok "telemetry env vars in ~/.claude/settings.json" ;;
+    *) fail "telemetry env vars in ~/.claude/settings.json" ;;
+esac
+
 step "codex status-line patch"
 if command -v codex >/dev/null 2>&1; then
     if bash "$SCRIPT_DIR/codex-patch/install-codex-statusline-patch.sh"; then

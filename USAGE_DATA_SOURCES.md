@@ -137,7 +137,7 @@ price ($/MTok):  opus 5/25 · sonnet 2/10 · haiku 1/5
 cost = in×pin + out×pout + cache_read×pin×0.1 + cache_write_5m×pin×1.25 + cache_write_1h×pin×2
 ```
 
-**Assistant messages do not cover every request.** In the tested interactive session, the two recorded messages summed to 20 input / 101 output / 58,777 cache-read / 11,919 cache-write tokens, while the same session's `cost-state` counted 1,267 / 365 / 94,178 / 11,968 **[tested]**. Computed from the messages, the cost is ≈ $0.030 against $0.0364 in `cost-state` — about 17% of the spend is not in the messages. What the missing requests are is not verified; their size fits Claude Code's background requests (e.g. session-title generation). OpenTelemetry's `query_source` attribute (§3.7) would name them.
+**Assistant messages do not cover every request.** In the tested interactive session, the two recorded messages summed to 20 input / 101 output / 58,777 cache-read / 11,919 cache-write tokens, while the same session's `cost-state` counted 1,267 / 365 / 94,178 / 11,968 **[tested]**. Computed from the messages, the cost is ≈ $0.030 against $0.0364 in `cost-state` — about 17% of the spend is not in the messages. OpenTelemetry (§3.7) identified them in a second interactive session: **session-title generation (`generate_session_title`) and prompt suggestions (`prompt_suggestion`)** **[tested]**.
 
 **`cost-state` records — per-session, per-model totals.** Present since Claude Code 2.1.239, in 71 of 159 main-session transcripts on 2026-09-30, 1–5 records per session; the exact trigger is not verified **[verified]**. It includes the requests the messages miss:
 
@@ -184,7 +184,7 @@ Enabled with `CLAUDE_CODE_ENABLE_TELEMETRY=1`; exporters `otlp`, `prometheus` (m
 - **`claude_code.token.usage`** and **`claude_code.cost.usage`** counters, attributed by `model` and `query_source` (`main` / `subagent` / `auxiliary` per the docs).
 - No quota percent anywhere **[docs]**.
 
-Not yet tested on an interactive session, which is where the requests missing from transcripts (§3.4) would show.
+Tested on an interactive session too **[tested 2026-09-30]**: four `api_request` events — `query_source` `repl_main_thread` ×2, `generate_session_title` and `prompt_suggestion` — summed exactly to the session's `cost-state` (1,267 / 286 / 94,492 / 11,946 tokens, $0.0360382). The transcript held only the two `repl_main_thread` requests: **the missing requests of §3.4 are session-title generation and prompt suggestions**, and telemetry is the only per-request record of them. Events are pushed by each Claude process in batches over OTLP; with `http/json`, a stdlib HTTP server is enough to receive them.
 
 ### 3.8 Anthropic Admin Usage / Cost API — not applicable
 

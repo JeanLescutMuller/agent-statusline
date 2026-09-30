@@ -41,6 +41,24 @@ assert_file_missing "the whole runtime dir is gone when nothing was left to pres
 assert_not_contains "no orphans reported on a clean install" "$TH_OUT" "orphan files/dirs under"
 rm -rf "$th_home"
 
+section "telemetry: LaunchAgent removed, only our env keys removed from settings.json"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-uninstallhome.XXXXXX")"
+mkdir -p "$th_home/.claude"
+printf '{"theme":"dark","env":{"MY_VAR":"keep"}}\n' > "$th_home/.claude/settings.json"
+run_install "$th_home"
+# A value changed by hand after install is someone else's now - must survive.
+jq '.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://elsewhere:4318"' "$th_home/.claude/settings.json" > "$th_home/s.tmp" \
+    && mv "$th_home/s.tmp" "$th_home/.claude/settings.json"
+run_uninstall "$th_home"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_file_missing "receiver LaunchAgent symlink removed" \
+    "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.otel.plist"
+assert_eq "our unchanged env keys removed, hand-changed and foreign ones kept" \
+    '{"MY_VAR":"keep","OTEL_EXPORTER_OTLP_ENDPOINT":"http://elsewhere:4318"}' \
+    "$(jq -cS .env "$th_home/.claude/settings.json")"
+assert_eq "other top-level keys untouched" "dark" "$(jq -r .theme "$th_home/.claude/settings.json")"
+rm -rf "$th_home"
+
 section "real quota data and the Codex patch build are preserved, not deleted"
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-uninstallhome.XXXXXX")"
 run_install "$th_home"

@@ -25,6 +25,8 @@ agent-statusline/
 ├── src/
 │   ├── statusline/                # statusline architecture: shared cache/format lib + refresh scripts
 │   │   └── push-claude-quota.sh      # appends to the claude quota log, and writes state/quota/claude directly (tag X)
+│   ├── telemetry/                # local OTLP receiver for Claude Code's usage events + its KeepAlive LaunchAgent;
+│   │                             # install.sh owns the telemetry keys in ~/.claude/settings.json's `env`
 │   └── quota_polling/            # quota polling: LaunchAgent-scheduled, deployed, unattended production code
 │       ├── poll_claude.py / poll_codex.py       # per-provider pollers
 │       ├── poll_codex_plan_history.py           # daily Codex plan_limit_history fetch (fractional per-window history)

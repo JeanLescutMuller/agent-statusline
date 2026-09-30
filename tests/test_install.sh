@@ -59,11 +59,33 @@ assert_contains "plist points at src/quota_polling/poll_all.py" \
 assert_eq "plist is symlinked into ~/Library/LaunchAgents, not copied" \
     "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist" \
     "$(readlink "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist")"
+assert_file_exists "telemetry receiver deployed" "$th_home/opt/agent-statusline/src/telemetry/otlp_receiver.py"
+assert_file_missing "the settings merge helper runs from the repo, never deployed" \
+    "$th_home/opt/agent-statusline/src/telemetry/merge_claude_env.py"
+assert_contains "receiver plist points at otlp_receiver.py" \
+    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.otel.plist")" "src/telemetry/otlp_receiver.py"
+assert_contains "receiver plist keeps it alive" \
+    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.otel.plist")" "<key>KeepAlive</key>"
+assert_eq "receiver plist is symlinked into ~/Library/LaunchAgents" \
+    "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.otel.plist" \
+    "$(readlink "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.otel.plist")"
+assert_eq "telemetry env vars merged into ~/.claude/settings.json" \
+    "$(jq -cS . "$REPO_ROOT/src/telemetry/claude_telemetry_env.json")" "$(jq -cS .env "$th_home/.claude/settings.json")"
 
 section "idempotent re-run: second run reports 'ok', not '[+]', for unchanged files"
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_not_contains "no file gets re-installed on an unchanged re-run" "$TH_OUT" "[+]"
+rm -rf "$th_home"
+
+section "telemetry env merge leaves every other settings key alone"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/.claude"
+printf '{"theme":"dark","env":{"MY_VAR":"keep","OTEL_LOGS_EXPORTER":"console"}}\n' > "$th_home/.claude/settings.json"
+run_install "$th_home"
+assert_eq "other top-level keys untouched" "dark" "$(jq -r .theme "$th_home/.claude/settings.json")"
+assert_eq "other env keys untouched" "keep" "$(jq -r .env.MY_VAR "$th_home/.claude/settings.json")"
+assert_eq "an owned key is set to our value" "otlp" "$(jq -r .env.OTEL_LOGS_EXPORTER "$th_home/.claude/settings.json")"
 rm -rf "$th_home"
 
 section "Codex [tui] config merge"
