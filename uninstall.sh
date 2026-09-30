@@ -1,17 +1,15 @@
 #!/bin/bash
-# Removes everything install.sh deploys: the quota-poll LaunchAgent, the
-# deployed provider adapters (~/.claude/statusline-command.sh,
-# ~/.codex/statusline-command.sh), and the code/cache/log/lock state under
-# ~/opt/agent-statusline. Run this before re-installing across an
-# incompatible on-disk layout change - see install.sh's own header comment
-# for why migration lives here instead of as one-off logic baked into that
-# script.
+# Removes everything install.sh deploys: the deployed provider adapters
+# (~/.claude/statusline-command.sh, ~/.codex/statusline-command.sh), and the
+# code/cache/log/lock state under ~/opt/agent-statusline. Run this before
+# re-installing across an incompatible on-disk layout change - see
+# install.sh's own header comment for why migration lives here instead of
+# as one-off logic baked into that script. Never touches agent-usage-tracker.
 #
 # Deliberately preserves two things instead of a blind rm -rf:
-# - data/ (claude-quota-history.jsonl, codex-quota-history.jsonl) -
-#   irreplaceable quota history, not reproducible if deleted (see
-#   adhoc_quotas_analysis/AGENTS.md). Remove it yourself if you really want
-#   it gone.
+# - data/, if present - usage history from before the 2026-09-30 split into
+#   agent-usage-tracker, which lives under ~/opt/agent-usage-tracker/data
+#   now. Irreplaceable; move it there or remove it yourself.
 # - codex-patch/ (the cloned source + build.log used to build the patched
 #   Codex binary) - the actual patched binary lives outside this tree, under
 #   ~/.codex/packages/standalone/; rebuilding this is a real network clone +
@@ -36,39 +34,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/utils.sh"
 
 RUNTIME="$HOME/opt/agent-statusline"
-LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
-QUOTA_LABEL="com.jeanlescut.agent-statusline"
-OTEL_LABEL="com.jeanlescut.agent-statusline.otel"
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN} agent-statusline uninstall${NC}"
 echo -e "${GREEN}========================================${NC}"
-
-step "quota poll LaunchAgent"
-if [ -f "$LAUNCH_AGENTS/$QUOTA_LABEL.plist" ] || [ -f "$RUNTIME/$QUOTA_LABEL.plist" ]; then
-    [ -n "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ] || \
-        launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENTS/$QUOTA_LABEL.plist" 2>/dev/null || true
-    rm -f "$LAUNCH_AGENTS/$QUOTA_LABEL.plist"
-    installed "unloaded and removed the LaunchAgent"
-else
-    ok "LaunchAgent already absent"
-fi
-
-step "telemetry receiver LaunchAgent"
-if [ -f "$LAUNCH_AGENTS/$OTEL_LABEL.plist" ] || [ -f "$RUNTIME/$OTEL_LABEL.plist" ]; then
-    [ -n "${AGENT_STATUSLINE_SKIP_LAUNCHD:-}" ] || \
-        launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENTS/$OTEL_LABEL.plist" 2>/dev/null || true
-    rm -f "$LAUNCH_AGENTS/$OTEL_LABEL.plist"
-    installed "unloaded and removed the LaunchAgent"
-else
-    ok "LaunchAgent already absent"
-fi
-
-step "claude telemetry settings"
-case "$(python3 "$SCRIPT_DIR/src/telemetry/merge_claude_env.py" unset)" in
-    changed) installed "removed the telemetry env vars from ~/.claude/settings.json" ;;
-    *) ok "telemetry env vars already absent" ;;
-esac
 
 step "provider adapters"
 for target in "$HOME/.claude/statusline-command.sh" "$HOME/.codex/statusline-command.sh"; do
@@ -102,14 +71,10 @@ if [ -d "$RUNTIME" ]; then
             sleep 0.5
         done
     done
-    rm -f "$RUNTIME/$QUOTA_LABEL.plist" "$RUNTIME/$OTEL_LABEL.plist"
     installed "removed deployed code and cache/log/lock state"
-    # rmdir only succeeds on an empty directory - an install that never
-    # actually collected data (or never built the Codex patch) leaves
-    # nothing behind; real content in either is left in place and reported.
-    rmdir "$RUNTIME/data/claude" "$RUNTIME/data/codex" 2>/dev/null
-    rmdir "$RUNTIME/data" 2>/dev/null
-    [ -d "$RUNTIME/data" ] && skip "preserved $RUNTIME/data (irreplaceable quota history)"
+    # rmdir only succeeds on an empty directory - a Codex patch that was
+    # never built leaves nothing behind; real content is kept and reported.
+    [ -d "$RUNTIME/data" ] && skip "preserved $RUNTIME/data (usage history from before the tracker split - check by hand)"
     rmdir "$RUNTIME/codex-patch" 2>/dev/null
     [ -d "$RUNTIME/codex-patch" ] && skip "preserved $RUNTIME/codex-patch (expensive to rebuild)"
 

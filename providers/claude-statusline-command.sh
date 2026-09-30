@@ -7,14 +7,21 @@ source "$lib_dir/cache.sh"
 source "$lib_dir/format.sh"
 statusline_cache_init
 
+# Optional: the separate agent-usage-tracker project. See README.md's
+# "agent-usage-tracker" for the whole contract - this file is the only
+# place that touches it.
+tracker_dir="${AGENT_USAGE_TRACKER_DIR:-$HOME/opt/agent-usage-tracker}"
+
 now="$(date '+%s')"
 
 statusline_touch_heartbeat claude "$now"
 
+payload="$(cat)"
+
 values=()
 while IFS= read -r -d '' value; do
     values+=("$value")
-done < <(jq -j '
+done < <(printf '%s' "$payload" | jq -j '
     def text($default): if . == null then $default else tostring end;
     [
         (.model.display_name | text("Claude")),
@@ -22,17 +29,10 @@ done < <(jq -j '
         (.cwd | text("?")),
         (.session_id | text("")),
         ((.context_window.used_percentage // 0) | round | tostring),
-        ((.rate_limits.five_hour.used_percentage // 0) | tostring),
-        (.rate_limits.five_hour.resets_at | text("")),
-        ((.rate_limits.seven_day.used_percentage // 0) | tostring),
-        (.rate_limits.seven_day.resets_at | text("")),
-        (.transcript_path | text("")),
-        ((.rate_limits.five_hour != null or .rate_limits.seven_day != null) | tostring),
-        (.cost.total_cost_usd | text("")),
-        (if .prompt_cache == null then "" else (.prompt_cache | tojson) end),
-        (.model.id | text("")),
         ((.rate_limits.five_hour.used_percentage // 0) | round | tostring),
-        ((.rate_limits.seven_day.used_percentage // 0) | round | tostring)
+        (.rate_limits.five_hour.resets_at | text("")),
+        ((.rate_limits.seven_day.used_percentage // 0) | round | tostring),
+        (.rate_limits.seven_day.resets_at | text(""))
     ] | .[] | ., "\u0000"
 ')
 
@@ -41,42 +41,31 @@ effort="${values[1]:-}"
 cwd="${values[2]:-?}"
 session_id="${values[3]:-}"
 context_pct="${values[4]:-0}"
-five_pct_raw="${values[5]:-0}"
+five_pct="${values[5]:-0}"
 five_reset="${values[6]:-}"
-week_pct_raw="${values[7]:-0}"
+week_pct="${values[7]:-0}"
 week_reset="${values[8]:-}"
-transcript_path="${values[9]:-}"
-has_rate_limits="${values[10]:-false}"
-session_cost_usd="${values[11]:-}"
-prompt_cache_json="${values[12]:-}"
-model_id="${values[13]:-}"
-five_pct="${values[14]:-0}"
-week_pct="${values[15]:-0}"
 
-# Push this render's own reading into the shared state file before display
-# (see src/statusline/push-claude-quota.sh - tags it X). Skipped when stdin
-# has no rate_limits at all (session hasn't sent a message yet). The
-# percents are passed unrounded so the history log keeps their float
-# precision; push-claude-quota.sh rounds only what goes into the state file.
-if [ "$has_rate_limits" = "true" ]; then
-    bash "$lib_dir/push-claude-quota.sh" \
-        "$transcript_path" "$five_pct_raw" "$five_reset" "$week_pct_raw" "$week_reset" \
-        "$session_id" "$session_cost_usd" "$prompt_cache_json" "$model_id" \
-        >/dev/null 2>&1 || true
+# Hand this render's raw payload to agent-usage-tracker, unchanged, before
+# display - it records the quota reading and updates its state file, so the
+# read-back below includes this render's own reading. Synchronous but
+# fire-and-forget: output and failures are ignored. Skipped when the tracker
+# isn't installed.
+if [ -x "$tracker_dir/bin/ingest-claude-statusline.sh" ]; then
+    printf '%s' "$payload" | "$tracker_dir/bin/ingest-claude-statusline.sh" >/dev/null 2>&1 || true
 fi
 
 model_display="$model"
 [ -n "$effort" ] && model_display="$model ($effort)"
 
-# state/quota/claude always holds the single freshest known reading -
-# whichever session's push or the poller last observed - so every render,
-# including this one's own push above, just reads it back for display
-# (quota_source ends up P or X; see push-claude-quota.sh and
-# src/quota_polling/poll_claude.py, the two writers). This is what makes
+# With agent-usage-tracker installed, its state/quota/claude holds the
+# single freshest known reading - whichever session's push or its poller
+# last observed - and overrides this render's own stdin values, so
 # concurrently open sessions converge on the same number instead of each
-# showing its own possibly-stale last-known reading.
+# showing its own possibly-stale reading (quota_source ends up P or X).
+# Without it, the stdin values above are displayed as they are.
 quota_source=""
-statusline_overlay_quota_cache "$STATUSLINE_STATE_DIR/quota/claude"
+statusline_overlay_quota_cache "$tracker_dir/state/quota/claude"
 
 statusline_common_segments
 

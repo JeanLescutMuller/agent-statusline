@@ -1,7 +1,0 @@
-data/
-*.log
-*.err
-__pycache__/
-.ipynb_checkpoints/
-claude-token-events.jsonl
-codex-token-events.jsonl

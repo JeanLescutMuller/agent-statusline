@@ -18,7 +18,7 @@ while IFS= read -r -d '' f; do
     rel="${f#"$REPO_ROOT"/}"
     th_run python3 -m py_compile "$f"
     assert_status "$rel has valid syntax" 0 "$TH_STATUS"
-done < <(find "$REPO_ROOT/adhoc_quotas_analysis" "$REPO_ROOT/src" "$REPO_ROOT/codex-patch" -name '*.py' -print0)
+done < <(find "$REPO_ROOT/codex-patch" -name '*.py' -print0)
 
 section "shellcheck (if available)"
 if command -v shellcheck >/dev/null 2>&1; then
@@ -43,5 +43,15 @@ other_crossers="$(grep -rl 'codex-patch' "$REPO_ROOT" \
     --include='*.sh' --exclude-dir=.git --exclude-dir=tests --exclude-dir=codex-patch \
     | grep -v -e '^'"$REPO_ROOT"'/install.sh$' -e '^'"$REPO_ROOT"'/uninstall.sh$' || true)"
 assert_eq "no other top-level script references codex-patch/" "" "$other_crossers"
+
+section "boundary with agent-usage-tracker: only the Claude provider touches it"
+# README.md's "agent-usage-tracker": the Claude provider pipes its payload
+# into the tracker's ingest script and reads its state file; nothing else
+# here knows the tracker exists.
+# Comment lines are ignored.
+tracker_refs="$(grep -rn 'agent-usage-tracker\|AGENT_USAGE_TRACKER' "$REPO_ROOT/src" "$REPO_ROOT/providers" \
+    "$REPO_ROOT/codex-patch" "$REPO_ROOT/install.sh" "$REPO_ROOT/uninstall.sh" 2>/dev/null \
+    | grep -v -e '^[^:]*:[0-9]*: *#' -e '^[^:]*/providers/claude-statusline-command.sh:' || true)"
+assert_eq "no other code references agent-usage-tracker" "" "$tracker_refs"
 
 harness_summary

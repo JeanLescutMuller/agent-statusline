@@ -3,14 +3,14 @@
 # README's "Offline testing" recipe: STATUSLINE_RUNTIME_DIR/STATUSLINE_LIB_DIR
 # point at an isolated temp runtime, and a captured payload is piped in.
 #
-# HOME is also overridden per call. push-claude-quota.sh (invoked as a
-# subprocess whenever the payload has rate_limits - see
-# test_push_claude_quota.sh for that script's own tests) hardcodes
-# $HOME/opt/agent-statusline/data/claude/, and
-# statusline_read_static falls back to $HOME/opt/bootstrap-home/bin/get_host_color
-# - pointing HOME at an empty temp dir makes both misses deterministic
-# instead of quietly depending on what's installed on the machine running
-# the suite.
+# HOME is also overridden per call: statusline_read_static falls back to
+# $HOME/opt/bootstrap-home/bin/get_host_color - pointing HOME at an empty
+# temp dir makes that miss deterministic instead of quietly depending on
+# what's installed on the machine running the suite.
+#
+# agent-usage-tracker is never the real one: AGENT_USAGE_TRACKER_DIR points
+# at an empty temp dir (tracker absent) or at a stub that records what it
+# was sent - this suite tests this repo's side of the contract only.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -20,6 +20,7 @@ FIXTURES="$TESTS_DIR/fixtures"
 th_tmp_runtime
 TH_HOME="$(mktemp -d "$TH_TMP/home.XXXXXX")"
 TH_HOME="$(cd "$TH_HOME" && pwd -P)"
+export AGENT_USAGE_TRACKER_DIR="$TH_TMP/no-tracker"
 
 run_claude() {
     local payload_file="$1" cwd="$2" err_file
@@ -70,8 +71,7 @@ assert_ne "back-to-back renders show different spinner frames" "$spin_a" "$spin_
 assert_contains "line 3 shows the context percentage" "$TH_OUT" "42%"
 assert_contains "line 3 shows the 5h percentage" "$TH_OUT" "55%"
 assert_contains "line 3 shows the 7d percentage" "$TH_OUT" "70%"
-assert_contains "5h is tagged X - this render's own push, read back immediately" "$TH_OUT" "55% (X)"
-assert_contains "7d is tagged X too" "$TH_OUT" "70% (X)"
+assert_not_contains "no tracker installed: no origin tag, the stdin value as-is" "$TH_OUT" "55% ("
 
 section "full payload outside a git repo"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
@@ -84,88 +84,64 @@ assert_status "exits 0" 0 "$TH_STATUS"
 assert_contains "model defaults to Claude" "$TH_OUT" "🤖 Claude"
 assert_contains "context defaults to 0%" "$TH_OUT" "0%"
 
-section "quota cache write-through and reuse"
-# A fresh STATUSLINE_RUNTIME_DIR (nested under the same trapped TH_TMP, no
-# new trap) so this section starts with no pre-existing quota cache from the
-# sections above.
-STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime2.XXXXXX")"
+section "agent-usage-tracker absent: stdin values are displayed"
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-notracker.XXXXXX")"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
-quota_cache="$STATUSLINE_RUNTIME_DIR/state/quota/claude"
-assert_file_exists "first call creates the state file from the payload's own push" "$quota_cache"
-assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "55"
-assert_file_exists "every render touches the liveness heartbeat src/quota_polling/poll_claude.py polls faster against" \
+assert_contains "5h from stdin" "$TH_OUT" "55%"
+assert_contains "7d from stdin" "$TH_OUT" "70%"
+assert_file_missing "nothing is created under the tracker's directory" "$AGENT_USAGE_TRACKER_DIR"
+assert_file_exists "every render touches the liveness heartbeat the tracker's pollers read" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
 
-run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_contains "a later call with no rate_limits in the payload still shows the cached 5h percent" "$TH_OUT" "55%"
-assert_contains "...and the cached 7d percent" "$TH_OUT" "70%"
-assert_contains "...still tagged X, from the earlier render's push" "$TH_OUT" "55% (X)"
-
-section "float percents reach the account file, session cost and prompt_cache the session file"
-STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-float.XXXXXX")"
-float_transcript="$TH_TMP/transcript-float.jsonl"
-printf '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}\n' > "$float_transcript"
-float_payload="$TH_TMP/payload-float.json"
-jq --arg t "$float_transcript" '. + {transcript_path: $t,
-        model: {id: "claude-opus-5-5", display_name: "Opus"},
-        cost: {total_cost_usd: 0.01234},
-        prompt_cache: {warm: true, misses: 1, miss_causes: {tools_changed: 1}, hit_ratio: 0.5},
-        rate_limits: {five_hour: {used_percentage: 23.5, resets_at: 1788091200},
-                      seven_day: {used_percentage: 41.2, resets_at: 1788307200}}}' \
-    "$FIXTURES/claude-payload.json" > "$float_payload"
-history_log="$TH_HOME/opt/agent-statusline/data/claude/account.jsonl"
-session_log="$TH_HOME/opt/agent-statusline/data/claude/session-abc123.jsonl"
-rm -f "$history_log" "$session_log"
-run_claude "$float_payload" "$plain_dir"
-assert_status "exits 0" 0 "$TH_STATUS"
-float_row="$(tail -n 1 "$history_log" 2>/dev/null)"
-assert_contains "5h percent logged unrounded" "$float_row" '"five_hour_pct":23.5'
-assert_contains "7d percent logged unrounded" "$float_row" '"seven_day_pct":41.2'
-assert_contains "account row names the observing session" "$float_row" '"observed_by_session":"session-abc123"'
-assert_not_contains "account row carries no session cost" "$float_row" "session_cost_usd"
-session_row="$(tail -n 1 "$session_log" 2>/dev/null)"
-assert_contains "session cost in the session file" "$session_row" '"session_cost_usd":0.01234'
-assert_contains "model id in the session file" "$session_row" '"model_id":"claude-opus-5-5"'
-assert_eq "prompt_cache passed through from stdin unchanged" '{"warm":true,"misses":1,"miss_causes":{"tools_changed":1},"hit_ratio":0.5}' \
-    "$(printf '%s' "$session_row" | jq -c .prompt_cache)"
-assert_not_contains "session file carries no percent" "$session_row" "pct"
-assert_contains "display still shows the rounded 5h percent" "$TH_OUT" "24% (X)"
-assert_contains "display still shows the rounded 7d percent" "$TH_OUT" "41% (X)"
-
-section "concurrent sessions converge on whichever reading is freshest"
-# Reproduces the scenario this design fixes: three "sessions" each with
-# their own live rate_limits (all tagged X, per above) used to each just
-# show their own last-known number - now they all read the same state file
-# back, so whichever pushed most recently wins for everyone, not just for
-# itself.
-STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime3.XXXXXX")"
-quota_cache="$STATUSLINE_RUNTIME_DIR/state/quota/claude"
-
-payload_for() {
-    local pct="$1" ts="$2" out="$3" transcript
-    transcript="$TH_TMP/transcript-$pct.jsonl"
-    printf '{"type":"assistant","timestamp":"%s"}\n' "$ts" > "$transcript"
-    sed "s#__CWD__#$plain_dir#" "$FIXTURES/claude-payload.json" \
-        | jq --arg t "$transcript" --argjson p "$pct" \
-            '. + {transcript_path: $t, rate_limits: (.rate_limits + {five_hour: {used_percentage: $p, resets_at: 1788091200}})}' \
-        > "$out"
+# A stub tracker: its ingest script saves exactly what it received, and
+# writes a state file the way the real one does (the FS-separated format).
+SEP=$'\034'
+stub_tracker() {
+    local dir="$1" state_line="$2"
+    mkdir -p "$dir/bin" "$dir/state/quota"
+    cat > "$dir/bin/ingest-claude-statusline.sh" <<STUB
+#!/bin/bash
+cat > "$dir/received.json"
+printf '%s\n' "$state_line" > "$dir/state/quota/claude"
+STUB
+    chmod +x "$dir/bin/ingest-claude-statusline.sh"
 }
 
-# Session A's last message was earliest; B's later; C hasn't sent one yet.
-payload_for 24 "2026-01-01T00:00:00.000Z" "$TH_TMP/payload-a.json"
-payload_for 25 "2026-01-01T00:05:00.000Z" "$TH_TMP/payload-b.json"
+section "agent-usage-tracker present: the raw payload goes in, its state file comes out"
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-tracker.XXXXXX")"
+AGENT_USAGE_TRACKER_DIR="$TH_TMP/tracker"
+stub_tracker "$AGENT_USAGE_TRACKER_DIR" "61${SEP}1788091200${SEP}72${SEP}1788307200${SEP}P${SEP}500"
+sed "s#__CWD__#$plain_dir#" "$FIXTURES/claude-payload.json" > "$TH_TMP/sent.json"
+run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_eq "the ingest script receives the stdin payload unchanged (bar the trailing newline)" \
+    "$(cat "$TH_TMP/sent.json")" "$(cat "$AGENT_USAGE_TRACKER_DIR/received.json")"
+assert_contains "5h comes from the tracker's state file, with its origin tag" "$TH_OUT" "61% (P)"
+assert_contains "7d too" "$TH_OUT" "72% (P)"
 
-run_claude "$TH_TMP/payload-a.json" "$plain_dir"
-assert_contains "session A shows its own 24%" "$TH_OUT" "24% (X)"
-
-run_claude "$TH_TMP/payload-b.json" "$plain_dir"
-assert_contains "session B shows its own, newer 25%" "$TH_OUT" "25% (X)"
-
+section "the tracker's state file is read before the payload's own values, whatever they say"
+rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_contains "session C (idle, no rate_limits yet) sees B's newer reading" "$TH_OUT" "25% (X)"
+assert_file_exists "a payload without rate_limits is forwarded too - the tracker decides" \
+    "$AGENT_USAGE_TRACKER_DIR/received.json"
+assert_contains "a render with no rate_limits still shows the account's reading" "$TH_OUT" "61% (P)"
 
-run_claude "$TH_TMP/payload-a.json" "$plain_dir"
-assert_contains "session A re-renders (still its own stale 24% on stdin) but now shows B's 25% too" \
-    "$TH_OUT" "25% (X)"
+section "a failing ingest script never breaks the render"
+cat > "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh" <<'STUB'
+#!/bin/bash
+echo "boom" >&2
+exit 3
+STUB
+run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_eq "still three lines" "3" "$(printf '%s\n' "$TH_OUT" | wc -l | tr -d ' ')"
+assert_not_contains "its stderr doesn't leak" "$TH_ERR" "boom"
+
+section "a non-executable ingest script is not run"
+rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
+printf '#!/bin/bash\ncat > "%s/received.json"\n' "$AGENT_USAGE_TRACKER_DIR" > "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh"
+chmod -x "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh"
+run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
+assert_file_missing "nothing received" "$AGENT_USAGE_TRACKER_DIR/received.json"
 
 harness_summary

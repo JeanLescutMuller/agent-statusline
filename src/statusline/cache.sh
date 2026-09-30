@@ -195,9 +195,9 @@ statusline_write_values_if_stale() {
     statusline_lock_release
 }
 
-# Liveness signal for src/quota_polling/'s watched-vs-idle poll cadence (see
-# each poller's own module docstring) - content doesn't matter, only mtime,
-# so a plain overwrite is fine, no lock needed.
+# Liveness signal read by agent-usage-tracker's pollers for their
+# watched-vs-idle cadence (see README.md's "agent-usage-tracker") - content
+# doesn't matter, only mtime, so a plain overwrite is fine, no lock needed.
 statusline_touch_heartbeat() {
     local provider="$1" now="$2"
     mkdir -p "$STATUSLINE_STATE_DIR/heartbeat"
@@ -233,10 +233,12 @@ statusline_advance_spin_index() {
 # five_pct/five_reset/week_pct/week_reset/quota_source (same implicit-variable
 # convention as statusline_common_segments in format.sh) - only overlays
 # fields the cache has a non-empty value for, so a not-yet-populated cache
-# can't blank out a caller's already-live value. Field 5 is an origin tag
-# (P/X - see statusline_write_quota_if_newer below), field 6 is the
-# observed_at epoch that write-time freshness compare used - read-only
-# bookkeeping here, never displayed, hence the throwaway `_`.
+# can't blank out a caller's already-live value. Two files use this format:
+# state/quota/codex (this repo's own, written by the Codex provider) and
+# agent-usage-tracker's state/quota/claude (read-only here - see
+# README.md's "agent-usage-tracker"). Field 5 is an origin tag (P = poll,
+# X = statusline push), field 6 the observed_at epoch the writers compare
+# on - read-only bookkeeping here, never displayed, hence the throwaway `_`.
 statusline_overlay_quota_cache() {
     local quota_cache="$1"
     local cached_five_pct cached_five_reset cached_week_pct cached_week_reset cached_source _
@@ -248,41 +250,6 @@ statusline_overlay_quota_cache() {
     [ -n "$cached_week_pct" ] && week_pct="$cached_week_pct"
     [ -n "$cached_week_reset" ] && week_reset="$cached_week_reset"
     [ -n "$cached_source" ] && quota_source="$cached_source"
-}
-
-# The one write path for a provider's small "latest known quota" state file
-# (state/quota/claude, and in principle any other provider that adopts the
-# same format). Every writer - a live statusline push, the scheduled poller -
-# calls this instead of writing the file directly, comparing on observed_at
-# (epoch seconds the reading was actually true, NOT write time) so whichever
-# producer has the genuinely freshest reading wins regardless of write order
-# or which mechanism produced it. The state file starts out simply absent;
-# the first writer to run - whichever happens first - creates it, no
-# separate seed/placeholder step needed.
-# No locking: two writers racing on the exact same instant could in theory
-# clobber each other's compare-then-write with a slightly-less-fresh value,
-# but atomic mv still guarantees no torn/corrupt file, and the next write
-# from either side (this runs on every render plus every poll tick)
-# self-corrects immediately - not worth a lock for that low a stake.
-# Fields written: five_pct FS five_reset FS week_pct FS week_reset FS
-# source FS observed_at.
-statusline_write_quota_if_newer() {
-    local quota_cache="$1" five_pct="$2" five_reset="$3" week_pct="$4" \
-        week_reset="$5" source="$6" observed_at="$7"
-    local cache_dir existing_observed_at="" tmp
-    cache_dir="${quota_cache%/*}"
-    mkdir -p "$cache_dir"
-    if [ -f "$quota_cache" ]; then
-        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r _ _ _ _ _ existing_observed_at < "$quota_cache"
-    fi
-    if [ -n "$existing_observed_at" ] && [ "$observed_at" -le "$existing_observed_at" ] 2>/dev/null; then
-        return 0
-    fi
-    tmp="${quota_cache}.tmp.$$-${RANDOM:-0}"
-    printf '%s\n' \
-        "${five_pct}${STATUSLINE_FIELD_SEPARATOR}${five_reset}${STATUSLINE_FIELD_SEPARATOR}${week_pct}${STATUSLINE_FIELD_SEPARATOR}${week_reset}${STATUSLINE_FIELD_SEPARATOR}${source}${STATUSLINE_FIELD_SEPARATOR}${observed_at}" \
-        > "$tmp"
-    mv "$tmp" "$quota_cache"
 }
 
 statusline_read_static() {

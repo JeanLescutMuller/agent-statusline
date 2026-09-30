@@ -15,12 +15,7 @@ CODEX_FREE_PATH="/opt/anaconda3/bin:/usr/bin:/bin:/opt/homebrew/bin:/usr/sbin:/s
 run_install() {
     local home="$1" err_file
     err_file="$(mktemp "${TMPDIR:-/tmp}/th-err.XXXXXX")"
-    # AGENT_STATUSLINE_SKIP_LAUNCHD: gui/$(id -u) is a real per-user launchd
-    # domain a HOME override can't sandbox - without this, every test run
-    # would bootstrap a real LaunchAgent pointing at a temp dir that's
-    # deleted when the test ends.
-    TH_OUT="$(HOME="$home" PATH="$CODEX_FREE_PATH" AGENT_STATUSLINE_SKIP_LAUNCHD=1 \
-        bash "$INSTALL" 2>"$err_file")"
+    TH_OUT="$(HOME="$home" PATH="$CODEX_FREE_PATH" bash "$INSTALL" 2>"$err_file")"
     TH_STATUS=$?
     TH_ERR="$(cat "$err_file")"
     rm -f "$err_file"
@@ -38,46 +33,18 @@ assert_file_missing "~/.codex/config.toml is not touched" "$th_home/.codex/confi
 
 section "deploys the shared lib and provider adapters"
 assert_file_exists "lib deployed under ~/opt/agent-statusline" "$th_home/opt/agent-statusline/src/statusline/cache.sh"
-assert_file_exists "Claude quota push script deployed as part of the shared lib" \
-    "$th_home/opt/agent-statusline/src/statusline/push-claude-quota.sh"
 assert_eq "Claude adapter is a symlink into the runtime copy, not a real file" \
     "$th_home/opt/agent-statusline/providers/claude-statusline-command.sh" "$(readlink "$th_home/.claude/statusline-command.sh")"
 assert_eq "Codex adapter is a symlink too" \
     "$th_home/opt/agent-statusline/providers/codex-statusline-command.sh" "$(readlink "$th_home/.codex/statusline-command.sh")"
 diff -q "$REPO_ROOT/providers/claude-statusline-command.sh" "$th_home/.claude/statusline-command.sh" >/dev/null
 assert_status "the symlink resolves to the current provider" 0 $?
-assert_file_exists "data/claude/ created" "$th_home/opt/agent-statusline/data/claude"
-assert_file_exists "data/codex/ created" "$th_home/opt/agent-statusline/data/codex"
+assert_file_missing "no data/ - usage history belongs to agent-usage-tracker" "$th_home/opt/agent-statusline/data"
+assert_file_missing "nothing of agent-usage-tracker's is deployed" "$th_home/opt/agent-usage-tracker"
+assert_file_missing "no LaunchAgent at all" "$th_home/Library/LaunchAgents"
+assert_file_missing "~/.claude/settings.json is not touched" "$th_home/.claude/settings.json"
 diff -q "$REPO_ROOT/src/statusline/cache.sh" "$th_home/opt/agent-statusline/src/statusline/cache.sh" >/dev/null
 assert_status "deployed lib matches the repo source" 0 $?
-
-section "deploys the quota pollers and their LaunchAgent"
-assert_file_exists "poll_claude.py deployed under ~/opt/agent-statusline/src/quota_polling" \
-    "$th_home/opt/agent-statusline/src/quota_polling/poll_claude.py"
-assert_file_exists "poll_codex.py deployed" "$th_home/opt/agent-statusline/src/quota_polling/poll_codex.py"
-assert_file_exists "poll_all.py deployed" "$th_home/opt/agent-statusline/src/quota_polling/poll_all.py"
-assert_file_exists "data/ created for the shared log" "$th_home/opt/agent-statusline/data"
-assert_file_missing "adhoc_quotas_analysis/ is ad-hoc/dev-only, never deployed" \
-    "$th_home/opt/agent-statusline/adhoc_quotas_analysis"
-assert_file_exists "LaunchAgent plist written" \
-    "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist"
-assert_contains "plist points at src/quota_polling/poll_all.py" \
-    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist")" "src/quota_polling/poll_all.py"
-assert_eq "plist is symlinked into ~/Library/LaunchAgents, not copied" \
-    "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.plist" \
-    "$(readlink "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist")"
-assert_file_exists "telemetry receiver deployed" "$th_home/opt/agent-statusline/src/telemetry/otlp_receiver.py"
-assert_file_missing "the settings merge helper runs from the repo, never deployed" \
-    "$th_home/opt/agent-statusline/src/telemetry/merge_claude_env.py"
-assert_contains "receiver plist points at otlp_receiver.py" \
-    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.otel.plist")" "src/telemetry/otlp_receiver.py"
-assert_contains "receiver plist keeps it alive" \
-    "$(cat "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.otel.plist")" "<key>KeepAlive</key>"
-assert_eq "receiver plist is symlinked into ~/Library/LaunchAgents" \
-    "$th_home/opt/agent-statusline/com.jeanlescut.agent-statusline.otel.plist" \
-    "$(readlink "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.otel.plist")"
-assert_eq "telemetry env vars merged into ~/.claude/settings.json" \
-    "$(jq -cS . "$REPO_ROOT/src/telemetry/claude_telemetry_env.json")" "$(jq -cS .env "$th_home/.claude/settings.json")"
 
 section "idempotent re-run: second run reports 'ok', not '[+]', for unchanged files"
 run_install "$th_home"
@@ -92,16 +59,6 @@ printf 'stale copy\n' > "$th_home/.claude/statusline-command.sh"
 run_install "$th_home"
 assert_eq "now a symlink" "$th_home/opt/agent-statusline/providers/claude-statusline-command.sh" \
     "$(readlink "$th_home/.claude/statusline-command.sh")"
-rm -rf "$th_home"
-
-section "telemetry env merge leaves every other settings key alone"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
-mkdir -p "$th_home/.claude"
-printf '{"theme":"dark","env":{"MY_VAR":"keep","OTEL_LOGS_EXPORTER":"console"}}\n' > "$th_home/.claude/settings.json"
-run_install "$th_home"
-assert_eq "other top-level keys untouched" "dark" "$(jq -r .theme "$th_home/.claude/settings.json")"
-assert_eq "other env keys untouched" "keep" "$(jq -r .env.MY_VAR "$th_home/.claude/settings.json")"
-assert_eq "an owned key is set to our value" "otlp" "$(jq -r .env.OTEL_LOGS_EXPORTER "$th_home/.claude/settings.json")"
 rm -rf "$th_home"
 
 section "Codex [tui] config merge"

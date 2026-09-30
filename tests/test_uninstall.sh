@@ -13,13 +13,13 @@ CODEX_FREE_PATH="/opt/anaconda3/bin:/usr/bin:/bin:/opt/homebrew/bin:/usr/sbin:/s
 
 run_install() {
     local home="$1"
-    HOME="$home" PATH="$CODEX_FREE_PATH" AGENT_STATUSLINE_SKIP_LAUNCHD=1 bash "$INSTALL" >/dev/null 2>&1
+    HOME="$home" PATH="$CODEX_FREE_PATH" bash "$INSTALL" >/dev/null 2>&1
 }
 
 run_uninstall() {
     local home="$1" err_file
     err_file="$(mktemp "${TMPDIR:-/tmp}/th-err.XXXXXX")"
-    TH_OUT="$(HOME="$home" AGENT_STATUSLINE_SKIP_LAUNCHD=1 bash "$UNINSTALL" 2>"$err_file")"
+    TH_OUT="$(HOME="$home" bash "$UNINSTALL" 2>"$err_file")"
     TH_STATUS=$?
     TH_ERR="$(cat "$err_file")"
     rm -f "$err_file"
@@ -30,8 +30,6 @@ th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-uninstallhome.XXXXXX")"
 run_install "$th_home"
 run_uninstall "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_file_missing "LaunchAgent symlink removed" \
-    "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.plist"
 assert_file_missing "Claude provider adapter removed" "$th_home/.claude/statusline-command.sh"
 assert_file_missing "Codex provider adapter removed" "$th_home/.codex/statusline-command.sh"
 assert_file_missing "deployed shared lib removed" "$th_home/opt/agent-statusline/src"
@@ -41,28 +39,10 @@ assert_file_missing "the whole runtime dir is gone when nothing was left to pres
 assert_not_contains "no orphans reported on a clean install" "$TH_OUT" "orphan files/dirs under"
 rm -rf "$th_home"
 
-section "telemetry: LaunchAgent removed, only our env keys removed from settings.json"
-th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-uninstallhome.XXXXXX")"
-mkdir -p "$th_home/.claude"
-printf '{"theme":"dark","env":{"MY_VAR":"keep"}}\n' > "$th_home/.claude/settings.json"
-run_install "$th_home"
-# A value changed by hand after install is someone else's now - must survive.
-jq '.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://elsewhere:4318"' "$th_home/.claude/settings.json" > "$th_home/s.tmp" \
-    && mv "$th_home/s.tmp" "$th_home/.claude/settings.json"
-run_uninstall "$th_home"
-assert_status "exits 0" 0 "$TH_STATUS"
-assert_file_missing "receiver LaunchAgent symlink removed" \
-    "$th_home/Library/LaunchAgents/com.jeanlescut.agent-statusline.otel.plist"
-assert_eq "our unchanged env keys removed, hand-changed and foreign ones kept" \
-    '{"MY_VAR":"keep","OTEL_EXPORTER_OTLP_ENDPOINT":"http://elsewhere:4318"}' \
-    "$(jq -cS .env "$th_home/.claude/settings.json")"
-assert_eq "other top-level keys untouched" "dark" "$(jq -r .theme "$th_home/.claude/settings.json")"
-rm -rf "$th_home"
-
-section "real quota data and the Codex patch build are preserved, not deleted"
+section "pre-split usage data and the Codex patch build are preserved, not deleted"
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-uninstallhome.XXXXXX")"
 run_install "$th_home"
-mkdir -p "$th_home/opt/agent-statusline/data" "$th_home/opt/agent-statusline/codex-patch/source-0.150.1"
+mkdir -p "$th_home/opt/agent-statusline/data/claude" "$th_home/opt/agent-statusline/codex-patch/source-0.150.1"
 printf '{"ts":1,"source":"claude_statusline"}\n' > "$th_home/opt/agent-statusline/data/claude/account.jsonl"
 printf 'build output\n' > "$th_home/opt/agent-statusline/codex-patch/build.log"
 run_uninstall "$th_home"
