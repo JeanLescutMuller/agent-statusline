@@ -98,7 +98,7 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   `agent-quota-tracker` repo preserved under this prefix). Source of truth
   **and the only copy** for the not-scheduled, run-by-hand research
   tooling (`split_quota_log.py`, `recompute_codex_events.py`,
-  `analysis.ipynb`) — run everything here directly, there is nothing to
+  `window_gaps.py`, `quota_model.py`, `analysis.ipynb`; findings live in `CONCLUSIONS.md`) — run everything here directly, there is nothing to
   redeploy (see "Naming history" steps 9-10 below for why this changed from
   an earlier design that did deploy the `.py` scripts, and why
   `recompute_token_events.py` isn't even a separate file any more). Output
@@ -399,15 +399,17 @@ must skip those.
   *activity-triggered*: it opens on the first message sent after the
   previous one expired, so `resets_at` = that moment + 5h. Between
   windows there are genuine idle gaps where the API reports
-  `resets_at: null, utilization: 0.0` and no window exists at all (four
-  such gaps so far, 0.3h–13.7h long). `analysis.ipynb` originally chained
+  `resets_at: null, utilization: 0.0` and no window exists at all (26 such
+  gaps of >20 min as of 2026-09-21, up to 213.8h - see `CONCLUSIONS.md`). `analysis.ipynb` originally chained
   `start = prev_end`, which back-dated window starts by up to ~13.7h;
   fixed 2026-08-26 to `end - span`. It made no numerical difference *on
   this data* — an idle gap is idle precisely because nothing was sent, and
   all four contain exactly 0 token events — but it would bite immediately
   if usage ever arrives from a client that doesn't write local
-  transcripts. `seven_day` is different: it really is a fixed rolling
-  schedule, so there both rules agree to within a minute.
+  transcripts. `seven_day` is different: its resets sit on a fixed weekly
+  lattice (Mon 19:00 UTC here), so both rules agree to within a minute -
+  though the API still reports a "no window" state between a reset and
+  the first message (see `CONCLUSIONS.md`).
 - **Poll coverage is much worse than the 5-minute interval suggests: ~46%
   of elapsed time has no reading at all.** Two distinct causes, and they
   need different fixes: (a) rows with `api: null` — the LaunchAgent fired
@@ -482,6 +484,8 @@ re-reading a bigger history — not because the new content itself grew.
 This is exactly what `/clear` and `/compact` exist to reset/shrink.
 
 ## Findings so far (2026-08-26, latest numbers refreshed 2026-08-27)
+
+**Superseded 2026-09-21 - see `CONCLUSIONS.md`.** The dollar figures below double-count every message (transcript lines were summed without deduplicating by `message.id`, 2.02x on this data): the real 5-hour budget is ~$32, not ~$73, and the post-promo weekly ratio measured ~8.85, not ~6.7. Kept below for provenance only.
 
 **Current numbers (2026-08-27, n=58 five-hour / n=32 seven-day intervals —
 grows every time `analysis.ipynb` re-runs; treat everything below as a
