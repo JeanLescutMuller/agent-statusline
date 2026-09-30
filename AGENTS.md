@@ -27,6 +27,7 @@ agent-statusline/
 │   │   └── push-claude-quota.sh      # appends to the claude quota log, and writes state/quota/claude directly (tag X)
 │   └── quota_polling/            # quota polling: LaunchAgent-scheduled, deployed, unattended production code
 │       ├── poll_claude.py / poll_codex.py       # per-provider pollers
+│       ├── poll_codex_plan_history.py           # daily Codex plan_limit_history fetch (fractional per-window history)
 │       ├── poll_all.py                          # the actual LaunchAgent entry point, runs both as subprocesses
 │       └── com.jeanlescut.agent-statusline.plist.template  # __PYTHON3__/__RUNTIME__ placeholders, filled by install.sh
 ├── adhoc_quotas_analysis/        # quota research: folded in from the former agent-quota-tracker repo,

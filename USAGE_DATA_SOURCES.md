@@ -248,7 +248,7 @@ Called directly by the Codex TUI and backend client, not exposed through app-ser
 | `GET usage/daily-token-usage-breakdown` | ⚠️ 200 | Per day × model × surface (`cli`, `vscode`, `web`, `work_web`, …), but `units: "percent"` normalised so the peak day = 100 — relative, not absolute; lags at least a day |
 | `GET usage/credit-usage-events` | ❌ 200 | Empty list on a Plus account |
 
-`plan_limit_history` is **the only fractional quota source for either agent**, and the only one that can be read retroactively (7 days).
+`plan_limit_history` is **the only fractional quota source for either agent**, and the only one that can be read retroactively (7 days). Two more facts it revealed **[verified 2026-09-30]**: the whole percent every live Codex source reports is `round(used_basis_points / 100)` (118.79 → 1, 806.21 → 8, 164.90 → 2), and `ends_at` is a window's *real* end — a 7-day window whose live readings all said `resetsAt` 09-28 09:05 actually ended 09-26 17:09, an early reset no live reading shows.
 
 ---
 

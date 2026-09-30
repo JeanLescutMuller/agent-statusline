@@ -108,6 +108,7 @@ printf '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}\n' > "$float
 float_payload="$TH_TMP/payload-float.json"
 jq --arg t "$float_transcript" '. + {transcript_path: $t,
         cost: {total_cost_usd: 0.01234},
+        prompt_cache: {warm: true, misses: 1, miss_causes: {tools_changed: 1}, hit_ratio: 0.5},
         rate_limits: {five_hour: {used_percentage: 23.5, resets_at: 1788091200},
                       seven_day: {used_percentage: 41.2, resets_at: 1788307200}}}' \
     "$FIXTURES/claude-payload.json" > "$float_payload"
@@ -120,6 +121,8 @@ assert_contains "5h percent logged unrounded" "$float_row" '"five_hour_pct":23.5
 assert_contains "7d percent logged unrounded" "$float_row" '"seven_day_pct":41.2'
 assert_contains "session_id logged" "$float_row" '"session_id":"session-abc123"'
 assert_contains "session cost logged" "$float_row" '"session_cost_usd":0.01234'
+assert_eq "prompt_cache passed through from stdin unchanged" '{"warm":true,"misses":1,"miss_causes":{"tools_changed":1},"hit_ratio":0.5}' \
+    "$(printf '%s' "$float_row" | jq -c .prompt_cache)"
 assert_contains "display still shows the rounded 5h percent" "$TH_OUT" "24% (X)"
 assert_contains "display still shows the rounded 7d percent" "$TH_OUT" "41% (X)"
 

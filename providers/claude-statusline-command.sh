@@ -29,6 +29,7 @@ done < <(jq -j '
         (.transcript_path | text("")),
         ((.rate_limits.five_hour != null or .rate_limits.seven_day != null) | tostring),
         (.cost.total_cost_usd | text("")),
+        (if .prompt_cache == null then "" else (.prompt_cache | tojson) end),
         ((.rate_limits.five_hour.used_percentage // 0) | round | tostring),
         ((.rate_limits.seven_day.used_percentage // 0) | round | tostring)
     ] | .[] | ., "\u0000"
@@ -46,8 +47,9 @@ week_reset="${values[8]:-}"
 transcript_path="${values[9]:-}"
 has_rate_limits="${values[10]:-false}"
 session_cost_usd="${values[11]:-}"
-five_pct="${values[12]:-0}"
-week_pct="${values[13]:-0}"
+prompt_cache_json="${values[12]:-}"
+five_pct="${values[13]:-0}"
+week_pct="${values[14]:-0}"
 
 # Push this render's own reading into the shared state file before display
 # (see src/statusline/push-claude-quota.sh - tags it X). Skipped when stdin
@@ -57,7 +59,7 @@ week_pct="${values[13]:-0}"
 if [ "$has_rate_limits" = "true" ]; then
     bash "$lib_dir/push-claude-quota.sh" \
         "$transcript_path" "$five_pct_raw" "$five_reset" "$week_pct_raw" "$week_reset" \
-        "$session_id" "$session_cost_usd" \
+        "$session_id" "$session_cost_usd" "$prompt_cache_json" \
         >/dev/null 2>&1 || true
 fi
 

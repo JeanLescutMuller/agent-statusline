@@ -36,11 +36,14 @@
 # reads it for display does integer arithmetic. session_cost_usd is the
 # payload's cumulative per-session cost.total_cost_usd, logged only (never
 # in the state file) - successive rows for one session_id give its spend
-# over time.
+# over time. prompt_cache_json is the payload's raw `prompt_cache` object
+# (session-level cache statistics and miss diagnostics, persisted nowhere
+# else - see USAGE_DATA_SOURCES.md §3.1), logged unchanged, `null` when
+# absent or not valid JSON.
 #
 # Usage: push-claude-quota.sh <transcript_path> <five_pct>
 #          <five_reset_iso> <week_pct> <week_reset_iso>
-#          [session_id] [session_cost_usd]
+#          [session_id] [session_cost_usd] [prompt_cache_json]
 set -uo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,7 +51,7 @@ source "$script_dir/cache.sh"
 
 transcript_path="${1:-}" five_pct="${2:-}" five_reset="${3:-}"
 week_pct="${4:-}" week_reset="${5:-}" session_id="${6:-}"
-session_cost_usd="${7:-}"
+session_cost_usd="${7:-}" prompt_cache_json="${8:-}"
 now="$(date +%s)"
 
 [ -n "$five_pct" ] || exit 0
@@ -97,14 +100,16 @@ if [ -n "$observed_at" ]; then
         --arg five_reset "$five_reset" \
         --arg week_reset "$week_reset" \
         --arg session_id "$session_id" \
-        --arg cost "$session_cost_usd" '
+        --arg cost "$session_cost_usd" \
+        --arg prompt_cache "$prompt_cache_json" '
         def num_or_null: if . == "" then null else (tonumber? // null) end;
         {ts: $ts, iso: $iso, source: "claude_statusline", observed_at: $observed_at,
          five_hour_pct: $five_pct, seven_day_pct: $week_pct,
          five_hour_resets_at: (($five_reset | select(. != "")) // null),
          seven_day_resets_at: (($week_reset | select(. != "")) // null),
          session_id: (($session_id | select(. != "")) // null),
-         session_cost_usd: ($cost | num_or_null)}
+         session_cost_usd: ($cost | num_or_null),
+         prompt_cache: (if $prompt_cache == "" then null else ($prompt_cache | fromjson? // null) end)}
     ' 2>/dev/null)"
     # A single write() call under 4KB with the file opened O_APPEND is
     # POSIX-atomic across processes - no locking needed even with many

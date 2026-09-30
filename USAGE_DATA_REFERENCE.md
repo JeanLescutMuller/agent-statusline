@@ -24,15 +24,17 @@ All data lives under `~/opt/agent-statusline/` (the deployed runtime; the code l
 | **Claude push** — `src/statusline/push-claude-quota.sh` | Every Claude status-line render, called by `providers/claude-statusline-command.sh` | Statusline stdin (Sources §3.1) | Claude log (`source: "claude_statusline"`) + `state/quota/claude` (tag `X`) |
 | **Claude poller** — `src/quota_polling/poll_claude.py` | LaunchAgent, 60 s tick, via `poll_all.py` | `GET /api/oauth/usage` (Sources §3.5) | Claude log (`source: "claude"`) + `state/quota/claude` (tag `P`) |
 | **Codex poller** — `src/quota_polling/poll_codex.py` | Same LaunchAgent tick | app-server `account/rateLimits/read` + `account/usage/read` (Sources §4.3) | Codex log (`source: "codex"`) |
+| **Codex plan-history poller** — `src/quota_polling/poll_codex_plan_history.py` | Same LaunchAgent tick | ChatGPT backend `plan_limit_history?days=7` (Sources §4.4) | Codex log (`source: "codex_plan_limit_history"`) + `state/poll/codex_plan_limit_history` (last attempt) |
 | **Codex status line** — `providers/codex-statusline-command.sh` | Every render of the patched Codex TUI | Codex stdin, provided by `codex-patch/` | `state/quota/codex` only, at most once per 60 s |
 
 ### 1.2 What each writer captures, by unit
 
 | Writer | Quota % | Tokens | Spend $ |
 |---|---|---|---|
-| Claude push | ✅ 5h + 7d, account-wide, whole numbers | ❌ (already exact in transcripts, Sources §3.4) | ✅ session cumulative, all models combined, list price — from the first deploy after 2026-09-29 |
+| Claude push | ✅ 5h + 7d, account-wide, whole numbers | ❌ (already exact in transcripts, Sources §3.4); prompt-cache statistics per session from 2026-09-30 | ✅ session cumulative, all models combined, list price — from the first deploy after 2026-09-29 |
 | Claude poller | ✅ 5h + 7d, account-wide, whole numbers, full raw response | ❌ (the endpoint has none) | ❌ (`used_dollars` always `null`) |
 | Codex poller | ✅ 5h + 7d, account-wide, whole numbers, full raw response | ✅ account-wide daily buckets + lifetime total | ❌ |
+| Codex plan-history poller | ✅ finished 5h + 7d windows of the last 7 days, **fractional** (basis points), with their real start and end, full raw response — from 2026-09-30 | ❌ | ❌ |
 
 ### 1.3 When each writer actually writes
 
@@ -41,6 +43,7 @@ All data lives under `~/opt/agent-statusline/` (the deployed runtime; the code l
 | Claude push | The render's stdin has `rate_limits` **and** the transcript's last lines give a timestamp for `observed_at`. No dedup: every such render adds a row. | No `rate_limits` on stdin (non-subscriber, or a window just expired); no usable transcript timestamp — the state file is then still updated, with `observed_at` = now |
 | Claude poller | Every tick while any Claude status line rendered in the last 90 s; otherwise when the last row is ≥ 5 min old. Errors are logged as rows too. | Mac asleep (launchd fires once on wake) |
 | Codex poller | Every tick while a Codex status line rendered in the last 90 s; otherwise when the last row is ≥ 5 min old | **Any Codex session file changed in the last 5 min** — the session file is then the fresher source (Sources §4.1); Mac asleep |
+| Codex plan-history poller | 24 h after its last successful attempt, 1 h after a failed one. Errors are logged as rows. | Mac asleep; independent of the Codex poller's skip rules |
 
 Coverage that follows from this:
 
@@ -79,7 +82,9 @@ Coverage that follows from this:
 | `session_id` | — | Per session | The session that *reported* the reading. The percent is still account-wide |
 | `session_cost_usd` | USD, list price | Per session, all models | Cumulative since the session started (or its last `/clear`). The delta between two rows of one `session_id`, ordered by `observed_at`, is that session's spend in the interval |
 
-`session_id` and `session_cost_usd` exist only from the first deploy after 2026-09-29; older rows lack them.
+| `prompt_cache` | object, raw | Per session, main conversation only | Claude Code's `prompt_cache` statistics exactly as on stdin (Sources §3.1): `warm`, `ttl`, `expires_at`, `requests`, `misses`, `expected_rebuilds`, `hit_ratio`, `cache_write_tokens`, `miss_recache_tokens`, `last_miss_at`, `last_miss_cause`, `miss_causes`, `recache_tokens_if_cold`. Cumulative for the session except the `last_*` / `warm` / `expires_at` snapshot fields. `null` before the session's first API response. `requests`, `hit_ratio` and `cache_write_tokens` match what the transcript's main-conversation messages give (178 / 0.98942 / 344,258 vs 178 / 0.98944 / 344,289 on a live session **[verified]**); the miss diagnostics (`misses`, `miss_causes`, `last_miss_cause`, `expected_rebuilds`, `recache_tokens_if_cold`) and `ttl` / `expires_at` are persisted nowhere else |
+
+`session_id` and `session_cost_usd` exist only from the first deploy after 2026-09-29, `prompt_cache` from the first deploy after 2026-09-30; older rows lack them. `prompt_cache` roughly doubles a row (≈ 290 → ≈ 590 bytes), so the file grows about 60 MB a month instead of 30.
 
 ### 2.2 Poller rows — `source: "claude"`
 
@@ -104,7 +109,9 @@ Coverage that follows from this:
 
 ## 3. `data/codex-quota-history.jsonl`
 
-13.4 MB, 4,006 lines, 24 days, ~22.5 KB/hour, 3,349 bytes/line **[verified]**. One writer.
+13.4 MB, 4,006 lines, 24 days, ~22.5 KB/hour, 3,349 bytes/line **[verified]**. Two writers, disambiguated by `source`.
+
+### 3.1 Poller rows — `source: "codex"`
 
 ```text
 ts, iso, source: "codex", error
@@ -123,6 +130,30 @@ codex_usage.dailyUsageBuckets[] = [{"startDate": "2026-08-10", "tokens": 144710}
 | `summary.lifetimeTokens` | tokens | Account-wide | Cumulative, account lifetime |
 
 Both objects are the **full raw RPC results**. `dailyUsageBuckets` is the only absolute account-wide token signal we record for either agent (Sources §4.3).
+
+### 3.2 Plan-history rows — `source: "codex_plan_limit_history"`
+
+About one row a day, from 2026-09-30.
+
+```json
+{"ts": 1790772845, "iso": "2026-09-30T12:14:05Z", "source": "codex_plan_limit_history",
+ "plan_limit_history": {"data_as_of": "2026-09-30T00:00:00Z", "coverage_start": "2026-09-23T00:00:00Z",
+                        "coverage_complete": false, "approximate": true, "boundary_tolerance_seconds": 60,
+                        "periods": [{"window_minutes": 300, "starts_at": "2026-09-24T18:32:13.056000Z",
+                                     "ends_at": "2026-09-24T23:32:13.056000Z", "used_basis_points": 118.790896,
+                                     "accounting_complete": true, ...}, ...]},
+ "error": null}
+```
+
+| Field | Unit | Granularity | Meaning |
+|---|---|---|---|
+| `periods[].used_basis_points` | hundredths of a percent, fractional | Account-wide, per finished window | Final usage of that window. `118.79` = 1.1879%. The live whole percent is `round(used_basis_points / 100)` **[verified on 3 windows]** |
+| `periods[].starts_at`, `ends_at` | ISO, UTC | Per window | The window's **real** span. A window reset early shows its actual end, where every live reading kept reporting the scheduled one **[verified: a 7-day window scheduled for 09-28 09:05 ended 09-26 17:09]** |
+| `periods[].window_minutes` | minutes | — | 300 (5 h) or 10080 (7 d) |
+| `periods[].accounting_complete` | bool | Per window | Whether the backend considers the window's usage final |
+| `data_as_of`, `coverage_start`, `coverage_complete`, `approximate`, `boundary_tolerance_seconds` | — | Per response | Freshness and coverage of the whole answer; `data_as_of` lagged to the start of the current UTC day |
+
+Only **finished** windows appear, and only windows that had usage. Each fetch overlaps the previous one by 6 days: dedupe periods by `(window_minutes, starts_at)` and keep the latest fetch.
 
 ---
 
@@ -188,6 +219,8 @@ Both logs have changed shape (§2.2's older formats, §2.1's added fields). Read
 | 2026-09-29 | Push adds `session_id` + `session_cost_usd` | Per-session spend over time, interactive sessions only |
 | 2026-09-30 | Push `observed_at` converted by calendar arithmetic instead of jq's `fromdateiso8601` | Earlier push rows written during DST are +3,600 s (§5.3) |
 | 2026-09-30 | Claude poller catches every `OSError` | Server disconnects become `network` error rows instead of silent gaps |
+| 2026-09-30 | Push adds the raw `prompt_cache` object | Session cache statistics and miss diagnostics, persisted nowhere else |
+| 2026-09-30 | New Codex plan-history poller | Fractional per-window history and real window ends, daily |
 | 2026-09-30 | Push token fields `session_input_tokens` / `session_output_tokens` removed before ever being deployed | They were mislabelled: the source field is context size, not a session total (Sources §3.1) |
 
 ---
@@ -198,8 +231,9 @@ From Sources §2, the data that exists nowhere else and that we do not record ye
 
 | Data | Source | Why it matters |
 |---|---|---|
-| **Codex quota history with fractions** | `plan_limit_history` (Sources §4.4) | The only sub-percent quota source for either agent; retroactive over 7 days, so it can fill our own gaps |
 | **Claude per-request $ and tokens, including requests absent from transcripts** | OpenTelemetry (Sources §3.7) | Transcripts miss ~17% of spend in the one session tested (Sources §3.4) |
+| Codex usage per day × model × client, relative | Backend analytics (Sources §4.4) | The only per-client split; relative only |
+| Claude quota status beyond the percent (`status`, `representative-claim`, overage) | `/v1/messages` headers (Sources §3.6) | Only reachable through a billed request of our own |
 
 Deliberately not captured because it already persists elsewhere: Claude per-message and per-session tokens and spend (transcripts, including `cost-state`), Codex per-turn and per-session tokens and quota (session files).
 

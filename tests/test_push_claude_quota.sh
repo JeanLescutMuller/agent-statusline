@@ -167,4 +167,18 @@ row="$(cat "$LOG")"
 assert_contains "no session_id -> null" "$row" '"session_id":null'
 assert_contains "no cost -> null" "$row" '"session_cost_usd":null'
 
+section "prompt_cache -> logged as the raw object, null when absent or invalid"
+reset
+write_transcript '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}'
+run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.5 '{"warm":true,"misses":2,"miss_causes":{"system_prompt_changed":2},"hit_ratio":0.83}'
+row="$(cat "$LOG")"
+assert_eq "prompt_cache object logged unchanged" '{"warm":true,"misses":2,"miss_causes":{"system_prompt_changed":2},"hit_ratio":0.83}' \
+    "$(printf '%s' "$row" | jq -c .prompt_cache)"
+reset
+run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.5 ""
+assert_contains "absent -> null" "$(cat "$LOG")" '"prompt_cache":null'
+reset
+run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.5 "not json"
+assert_contains "invalid JSON -> null, row still written" "$(cat "$LOG")" '"prompt_cache":null'
+
 harness_summary
