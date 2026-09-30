@@ -2,8 +2,8 @@
 """Samples Codex CLI's rate-limit/usage state on a timer, same rationale as
 poll_claude.py: this side has no history either, a missed reading is
 permanently lost. Appends one record per run to
-data/codex-quota-history.jsonl (this poller's own file, a sibling of
-poll_claude.py's data/claude-quota-history.jsonl - split 2026-08-31, see
+data/codex/account.jsonl (this agent's account-scope file, a sibling of
+poll_claude.py's data/claude/account.jsonl - per-provider since 2026-08-31, per-scope since 2026-09-30, see
 AGENTS.md's "Naming history") - the full raw `account/rateLimits/read` and
 `account/usage/read` results, unfiltered, or an `error` object saying which
 stage failed and why.
@@ -71,7 +71,7 @@ import _quota_common
 # not parent.parent, or this would look for a nonexistent
 # src/data/ instead of the real sibling-of-src/ data/.
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-QUOTA_LOG_FILE = DATA_DIR / "codex-quota-history.jsonl"
+QUOTA_LOG_FILE = DATA_DIR / "codex" / "account.jsonl"  # account scope: the meter (USAGE_DATA_REFERENCE.md §1)
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 HEARTBEAT_FILE = Path.home() / "opt" / "agent-statusline" / "state" / "heartbeat" / "codex"
 
@@ -176,7 +176,7 @@ def fetch_codex_state() -> tuple[dict | None, dict | None, dict | None]:
 def _last_codex_log_ts() -> int | None:
     """Timestamp of the last codex-sourced row, from the tail of the log
     (see _quota_common.tail_json_rows). The source filter is now redundant
-    in the common case (codex-quota-history.jsonl only ever gets
+    in the common case (the Codex log only ever gets
     `source: "codex"` rows written to it since the 2026-08-31 per-provider
     split), but kept as a cheap defensive check against a stray/malformed
     row rather than trusting file identity alone."""
@@ -214,7 +214,7 @@ def _codex_session_recently_active(now: float) -> bool:
 
 
 def main() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    QUOTA_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     now = time.time()
     if _codex_session_recently_active(now):

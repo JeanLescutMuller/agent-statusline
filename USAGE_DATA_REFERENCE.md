@@ -10,22 +10,50 @@ Markers: **[verified]** was measured on this machine's data; **[docs]** comes fr
 
 ## 1. Overview
 
-All data lives under `~/opt/agent-statusline/` (the deployed runtime; the code lives in `~/dev/agent-statusline`). The two provider scripts are deployed outside it, as `~/.claude/statusline-command.sh` and `~/.codex/statusline-command.sh`. Two kinds of data file, easy to conflate:
+All data lives under `~/opt/agent-statusline/` (the deployed runtime; the code lives in `~/dev/agent-statusline`). The two provider scripts are deployed there too, under `providers/`; `~/.claude/statusline-command.sh` and `~/.codex/statusline-command.sh` are symlinks to them.
+
+**Usage data is split by agent and by scope** (since 2026-09-30):
+
+```
+data/
+├── claude/
+│   ├── account.jsonl          account scope: the meter
+│   └── <session-id>.jsonl     session scope: one file per Claude session
+├── codex/
+│   └── account.jsonl          account scope: the meter (no Codex session files - see below)
+├── _unattributed/             telemetry events that carried no usable session id
+└── _archive/                  the pre-2026-09-30 logs, kept after the migration
+```
+
+**The scope rule — percent is account-scope only.** The quota meter is one account-level number: when two sessions spend at once, there is no per-session percentage — not a hidden one, an undefined one. So:
+
+| File | Carries | Never carries |
+|---|---|---|
+| `data/<agent>/account.jsonl` | Meter percent, reset times, `observed_at`, `source`, and `observed_by_session` on push rows | Per-session cost or token totals |
+| `data/<agent>/<session-id>.jsonl` | Tokens, USD, model, cache statistics, `observed_at`, `source` | **A quota percent, under any name** |
+
+The two scopes join on **`observed_at`** (a time join); no field is duplicated across them. Downstream projects must read this rule from here rather than infer it. Nothing in this repository estimates or apportions a per-session percentage, and nothing will: any such figure is derived downstream, with its uncertainty stated there.
+
+`observed_by_session` on an account row names the session that was rendering when the reading was taken — a free liveness signal — **not** the session whose usage it is. It replaced the push rows' `session_id` so it cannot be misread as attribution.
+
+Codex has no session files: nothing we capture is Codex-session-scoped. Its per-turn and per-thread tokens stay in Codex's own `~/.codex/sessions/` files (Sources §4.1).
+
+Two kinds of file in total, easy to conflate:
 
 | Kind | Files | Purpose | Read live? |
 |---|---|---|---|
-| **History logs** | `data/claude-quota-history.jsonl`, `data/codex-quota-history.jsonl` | Append-only raw record, kept for research (`adhoc_quotas_analysis/`) and for downstream projects | No |
+| **History logs** | `data/<agent>/account.jsonl`, `data/claude/<session-id>.jsonl` | Append-only raw record, kept for research (`adhoc_quotas_analysis/`) and for downstream projects | No |
 | **Latest-reading state** | `state/quota/claude`, `state/quota/codex` | One reading per provider, FS-delimited (formats differ, §4) | Yes, by the status line |
 
 ### 1.1 Writers
 
 | Writer | Scheduled by | Upstream source | Writes |
 |---|---|---|---|
-| **Claude push** — `src/statusline/push-claude-quota.sh` | Every Claude status-line render, called by `providers/claude-statusline-command.sh` | Statusline stdin (Sources §3.1) | Claude log (`source: "claude_statusline"`) + `state/quota/claude` (tag `X`) |
-| **Claude poller** — `src/quota_polling/poll_claude.py` | LaunchAgent, 60 s tick, via `poll_all.py` | `GET /api/oauth/usage` (Sources §3.5) | Claude log (`source: "claude"`) + `state/quota/claude` (tag `P`) |
-| **Codex poller** — `src/quota_polling/poll_codex.py` | Same LaunchAgent tick | app-server `account/rateLimits/read` + `account/usage/read` (Sources §4.3) | Codex log (`source: "codex"`) |
-| **Codex plan-history poller** — `src/quota_polling/poll_codex_plan_history.py` | Same LaunchAgent tick | ChatGPT backend `plan_limit_history?days=7` (Sources §4.4) | Codex log (`source: "codex_plan_limit_history"`) + `state/poll/codex_plan_limit_history` (last attempt) |
-| **Telemetry receiver** — `src/telemetry/otlp_receiver.py` | Its own LaunchAgent, always running (`KeepAlive`); Claude Code pushes to it | Claude Code's OpenTelemetry events (Sources §3.7) | `data/claude-telemetry.jsonl` (§9) |
+| **Claude push** — `src/statusline/push-claude-quota.sh` | Every Claude status-line render, called by `providers/claude-statusline-command.sh` | Statusline stdin (Sources §3.1) | `claude/account.jsonl` + `claude/<session-id>.jsonl` (both `source: "claude_statusline"`) + `state/quota/claude` (tag `X`) |
+| **Claude poller** — `src/quota_polling/poll_claude.py` | LaunchAgent, 60 s tick, via `poll_all.py` | `GET /api/oauth/usage` (Sources §3.5) | `claude/account.jsonl` (`source: "claude"`) + `state/quota/claude` (tag `P`) |
+| **Codex poller** — `src/quota_polling/poll_codex.py` | Same LaunchAgent tick | app-server `account/rateLimits/read` + `account/usage/read` (Sources §4.3) | `codex/account.jsonl` (`source: "codex"`) |
+| **Codex plan-history poller** — `src/quota_polling/poll_codex_plan_history.py` | Same LaunchAgent tick | ChatGPT backend `plan_limit_history?days=7` (Sources §4.4) | `codex/account.jsonl` (`source: "codex_plan_limit_history"`) + `state/poll/codex_plan_limit_history` (last attempt) |
+| **Telemetry receiver** — `src/telemetry/otlp_receiver.py` | Its own LaunchAgent, always running (`KeepAlive`); Claude Code pushes to it | Claude Code's OpenTelemetry events (Sources §3.7) | `claude/<session-id>.jsonl` (`source: "claude_otel"`, §9) |
 | **Codex status line** — `providers/codex-statusline-command.sh` | Every render of the patched Codex TUI | Codex stdin, provided by `codex-patch/` | `state/quota/codex` only, at most once per 60 s |
 
 ### 1.2 What each writer captures, by unit
@@ -60,34 +88,49 @@ Coverage that follows from this:
 
 ---
 
-## 2. `data/claude-quota-history.jsonl`
+## 2. `data/claude/account.jsonl` and `data/claude/<session-id>.jsonl`
 
-32.6 MB, 113,002 lines, 30 days, ~44 KB/hour **[verified]**. Two writers share the file, disambiguated by `source`.
+`account.jsonl` holds every Claude meter reading: push rows and poller rows, disambiguated by `source`. It is the continuation of the pre-2026-09-30 `data/claude-quota-history.jsonl` (32.6 MB, 113,002 lines over 30 days as of 2026-09-29 **[verified]**), migrated row for row: every row that carried no session field is **byte-identical** to the original. **Account rows still come in several shapes** (§2.1 push rows, §2.2 poller rows and their older formats) — readers must still sniff the shape.
+
+Session files hold the push path's session rows (§2.1) and the telemetry receiver's per-request rows (§9), one file per Claude `session_id`.
 
 ### 2.1 Push rows — `source: "claude_statusline"`
 
-100,199 rows (89%) **[verified]**.
+About 89% of account rows **[verified]**. From 2026-09-30, every render that writes an account row also writes a session row to the rendering session's own file (when its `session_id` is a plain UUID-like token), with the same `observed_at`:
 
 ```json
-{"ts": 1790699167, "iso": "2026-09-29T16:26:07Z", "source": "claude_statusline",
- "observed_at": 1790699160,
- "five_hour_pct": 17, "seven_day_pct": 4,
- "five_hour_resets_at": "1790784600", "seven_day_resets_at": "1791226800",
- "session_id": "248c4a95-...", "session_cost_usd": 0.0364458}
+account.jsonl:
+{"ts": 1790774229, "iso": "2026-09-30T13:17:09Z", "source": "claude_statusline", "observed_at": 1790773293,
+ "five_hour_pct": 50, "seven_day_pct": 9, "five_hour_resets_at": "1790784600", "seven_day_resets_at": "1791226800",
+ "observed_by_session": "8b301a30-..."}
+
+8b301a30-....jsonl:
+{"ts": 1790774229, "iso": "2026-09-30T13:17:09Z", "source": "claude_statusline", "observed_at": 1790773293,
+ "model_id": "claude-haiku-4-5-20251001", "session_cost_usd": 0.0360382, "prompt_cache": {"warm": true, "requests": 2, "misses": 0, ...}}
 ```
+
+Account row:
 
 | Field | Unit | Granularity | Meaning |
 |---|---|---|---|
 | `ts`, `iso` | epoch s / ISO | — | Append time. **Not** when the reading was true |
-| `observed_at` | epoch s | — | Timestamp of the transcript's last message: when Claude Code's in-memory reading became true. **The only trustworthy time key**; pre-fix rows are one hour late during DST (§5.3) |
+| `observed_at` | epoch s | — | Timestamp of the transcript's last message: when Claude Code's in-memory reading became true. **The only trustworthy time key**, and the join key to session rows; pre-fix rows are one hour late during DST (§5.3) |
 | `five_hour_pct`, `seven_day_pct` | % | Account-wide | Level within the current window, resets to 0 at window end. Written as received; always whole in practice (§5.1) |
 | `five_hour_resets_at`, `seven_day_resets_at` | epoch s, as a string | Account-wide | Window end; stable while the window runs, so it doubles as a window id. `null` when absent |
-| `session_id` | — | Per session | The session that *reported* the reading. The percent is still account-wide |
-| `session_cost_usd` | USD, list price | Per session, all models | Cumulative since the session started (or its last `/clear`). The delta between two rows of one `session_id`, ordered by `observed_at`, is that session's spend in the interval |
+| `observed_by_session` | — | — | The session that was rendering when the reading was taken. **Who observed it, not whose usage it is.** `null` when the payload had none. Absent on rows before 2026-09-29's deploy |
 
-| `prompt_cache` | object, raw | Per session, main conversation only | Claude Code's `prompt_cache` statistics exactly as on stdin (Sources §3.1): `warm`, `ttl`, `expires_at`, `requests`, `misses`, `expected_rebuilds`, `hit_ratio`, `cache_write_tokens`, `miss_recache_tokens`, `last_miss_at`, `last_miss_cause`, `miss_causes`, `recache_tokens_if_cold`. Cumulative for the session except the `last_*` / `warm` / `expires_at` snapshot fields. `null` before the session's first API response. `requests`, `hit_ratio` and `cache_write_tokens` match what the transcript's main-conversation messages give (178 / 0.98942 / 344,258 vs 178 / 0.98944 / 344,289 on a live session **[verified]**); the miss diagnostics (`misses`, `miss_causes`, `last_miss_cause`, `expected_rebuilds`, `recache_tokens_if_cold`) and `ttl` / `expires_at` are persisted nowhere else |
+Session row (never a percent):
 
-`session_id` and `session_cost_usd` exist only from the first deploy after 2026-09-29, `prompt_cache` from the first deploy after 2026-09-30; older rows lack them. `prompt_cache` roughly doubles a row (≈ 290 → ≈ 590 bytes), so the file grows about 60 MB a month instead of 30.
+| Field | Unit | Granularity | Meaning |
+|---|---|---|---|
+| `ts`, `iso`, `source`, `observed_at` | — | — | As on the account row written in the same render |
+| `model_id` | — | Per session, current model | `model.id` from stdin; absent on rows migrated from before 2026-09-30 |
+| `session_cost_usd` | USD, list price | Per session, all models | Cumulative since the session started (or its last `/clear`). The delta between two rows of one file, ordered by `observed_at`, is that session's spend in the interval |
+| `prompt_cache` | object, raw | Per session, main conversation only | Claude Code's `prompt_cache` statistics exactly as on stdin (Sources §3.1): `warm`, `ttl`, `expires_at`, `requests`, `misses`, `expected_rebuilds`, `hit_ratio`, `cache_write_tokens`, `miss_recache_tokens`, `last_miss_at`, `last_miss_cause`, `miss_causes`, `recache_tokens_if_cold`. Cumulative for the session except the `last_*` / `warm` / `expires_at` snapshot fields. `null` before the session's first API response. `requests`, `hit_ratio` and `cache_write_tokens` match what the transcript's main-conversation messages give (178 / 0.98942 / 344,258 vs 178 / 0.98944 / 344,289 on a live session **[verified]**); the miss diagnostics and `ttl` / `expires_at` are persisted nowhere else. `hit_ratio` is a cache ratio, not a quota percent |
+
+Session rows exist only from the 2026-09-29/30 deploys: rows written before carried no session fields and produce no session file (none is synthesised). A session row is about 300 bytes; a session rendering every 10 s adds about 2.6 MB a day to its file.
+
+**Headless `claude -p` writes no push rows and no session-file push rows** — it never renders a status line (verified 2026-09-30, §8). Its session file, if any, holds only telemetry rows (§9).
 
 ### 2.2 Poller rows — `source: "claude"`
 
@@ -110,9 +153,9 @@ Coverage that follows from this:
 
 ---
 
-## 3. `data/codex-quota-history.jsonl`
+## 3. `data/codex/account.jsonl`
 
-13.4 MB, 4,006 lines, 24 days, ~22.5 KB/hour, 3,349 bytes/line **[verified]**. Two writers, disambiguated by `source`.
+The continuation of the pre-2026-09-30 `data/codex-quota-history.jsonl` (13.4 MB, 4,006 lines over 24 days as of 2026-09-29, ~3,349 bytes/line **[verified]**), migrated **byte-identical**. Two writers, disambiguated by `source`. Every row is account-scope; there are no Codex session files.
 
 ### 3.1 Poller rows — `source: "codex"`
 
@@ -207,9 +250,15 @@ The Codex poller deliberately skips while a session file is fresh (§1.3), so th
 
 ### 5.6 No schema version
 
-Both logs have changed shape (§2.2's older formats, §2.1's added fields). Readers must sniff the shape; a missing key means "older row", never zero.
+Both account files carry several row shapes (§2.2's older formats, §2.1's added fields, §3's two sources), migrated as-is rather than normalised. Readers must sniff the shape; a missing key means "older row", never zero.
 
 ---
+
+### 5.7 Listing session files, and retention
+
+- **Any glob over `data/<agent>/*.jsonl` must exclude `account.jsonl` explicitly** — it shares the directory with the session files.
+- A session file is named by its session id only; its time span is in its rows. To find recent sessions, **filter by file mtime** (a file is appended to while its session is active) instead of listing and reading every file.
+- **Retention: none — session files are kept indefinitely**, like the account files. This month of data is the only evidence base this repository and its consumers have, and files are small (≈ 156 Claude sessions a month, most a few hundred KB). Revisit if `data/claude/` passes ~1 GB.
 
 ## 6. Change history
 
@@ -225,6 +274,8 @@ Both logs have changed shape (§2.2's older formats, §2.1's added fields). Read
 | 2026-09-30 | Push adds the raw `prompt_cache` object | Session cache statistics and miss diagnostics, persisted nowhere else |
 | 2026-09-30 | New Codex plan-history poller | Fractional per-window history and real window ends, daily |
 | 2026-09-30 | Telemetry receiver + `env` keys in `~/.claude/settings.json` | Per-request Claude usage, including requests absent from transcripts, for sessions started after the install |
+| **2026-09-30** | **Per-agent, per-scope layout**: `data/claude-quota-history.jsonl` → `data/claude/account.jsonl`, `data/codex-quota-history.jsonl` → `data/codex/account.jsonl`, new `data/claude/<session-id>.jsonl`; `data/claude-telemetry.jsonl` folded into the session files. Push rows' `session_id` → `observed_by_session`; `session_cost_usd` and `prompt_cache` moved to session rows; session rows gain `model_id`. Migrated by `adhoc_quotas_analysis/split_by_scope.py`, originals in `data/_archive/`. **Percent is account-scope only from here on (§1).** | Rows without session fields are byte-identical to the originals; row counts reconcile exactly. `adhoc_quotas_analysis/quota_model.py` and `window_gaps.py` reproduce their previous output byte for byte |
+| 2026-09-30 | Provider scripts deployed under `~/opt/agent-statusline/providers/`, symlinked from `~/.claude/` and `~/.codex/` | The old real-file copy had gone stale unnoticed |
 | 2026-09-30 | Push token fields `session_input_tokens` / `session_output_tokens` removed before ever being deployed | They were mislabelled: the source field is context size, not a session total (Sources §3.1) |
 
 ---
@@ -246,19 +297,20 @@ Deliberately not captured because it already persists elsewhere: Claude per-mess
 
 | Claim | How |
 |---|---|
-| Row shapes and counts | `python3 -c "import json,collections;c=collections.Counter(tuple(sorted(json.loads(l))) for l in open('data/claude-quota-history.jsonl'));print(c.most_common())"` |
+| Row shapes and counts | `python3 -c "import json,collections;c=collections.Counter(tuple(sorted(json.loads(l))) for l in open('data/claude/account.jsonl'));print(c.most_common())"` |
 | Poller failure rate | Count rows where `error` is non-null |
 | Envelope compression | Apply `quota_model.py`'s `envelope()` and compare row counts |
 | Fractional percent | Scan `five_hour_pct`, `seven_day_pct`, `api.*.utilization`, `usedPercent` for non-integers |
-| Writer behaviour | `bash tests/run.sh`; `tests/test_push_claude_quota.sh` covers the push path |
+| Writer behaviour | `bash tests/run.sh`; `tests/test_push_claude_quota.sh` covers the push path, `tests/test_split_by_scope.sh` the migration |
+| Scope rule holds | For every `data/<agent>/*.jsonl` except `account.jsonl`, no key path matching `pct\|percent\|utiliz\|basis_points`; no `account.jsonl` row with `session_cost_usd`, `prompt_cache` or a bare `session_id` |
 
 When any of this changes, update this file and its "Last verified" line.
 
 ---
 
-## 9. `data/claude-telemetry.jsonl`
+## 9. Telemetry rows in `data/claude/<session-id>.jsonl`
 
-One row per Claude API request (and per API error / refusal / exhausted retry), from 2026-09-30. Written by `src/telemetry/otlp_receiver.py`, a local receiver on `127.0.0.1:4318` run by the `com.jeanlescut.agent-statusline.otel` LaunchAgent. Nothing polls: Claude Code sends the events itself, because `install.sh` adds these keys to the `env` object of `~/.claude/settings.json` (`src/telemetry/claude_telemetry_env.json`; `uninstall.sh` removes them again):
+One row per Claude API request (and per API error / refusal / exhausted retry), from 2026-09-30, appended to the file of the session that made it (`attributes["session.id"]`), next to that session's push rows. Rows are tagged `source: "claude_otel"`, with `observed_at` = the event time in epoch seconds (the join key). Events without a usable session id go to `data/_unattributed/claude-otel.jsonl`. Written by `src/telemetry/otlp_receiver.py`, a local receiver on `127.0.0.1:4318` run by the `com.jeanlescut.agent-statusline.otel` LaunchAgent. Nothing polls: Claude Code sends the events itself, because `install.sh` adds these keys to the `env` object of `~/.claude/settings.json` (`src/telemetry/claude_telemetry_env.json`; `uninstall.sh` removes them again):
 
 ```text
 CLAUDE_CODE_ENABLE_TELEMETRY=1            OTEL_LOGS_EXPORTER=otlp      OTEL_METRICS_EXPORTER=none
@@ -268,7 +320,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/json     OTEL_EXPORTER_OTLP_ENDPOINT=http://127
 Only sessions started after those keys were written send events. If the receiver is down, Claude Code drops the batch; nothing is buffered on disk.
 
 ```json
-{"received_at": 1790773236, "event": "api_request", "time_unix_nano": 1790773229123000000,
+{"source": "claude_otel", "observed_at": 1790773229, "received_at": 1790773236, "event": "api_request", "time_unix_nano": 1790773229123000000,
  "attributes": {"model": "claude-haiku-4-5-20251001", "query_source": "generate_session_title",
                 "input_tokens": 897, "output_tokens": 9, "cache_read_tokens": 0, "cache_creation_tokens": 0,
                 "cost_usd": 0.000942, "cost_usd_micros": 942, "duration_ms": ..., "ttft_ms": ..., "speed": "normal",

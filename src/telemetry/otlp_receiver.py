@@ -5,10 +5,14 @@ Claude Code pushes its telemetry itself (nothing here polls anything): with
 the env vars install.sh merges into ~/.claude/settings.json, every Claude
 process - interactive or `claude -p` - POSTs batches of OTLP log records as
 JSON to http://127.0.0.1:4318/v1/logs every few seconds. This server accepts
-those batches and appends one row per usage event to
-data/claude-telemetry.jsonl. See USAGE_DATA_SOURCES.md §3.7 for what the
-events carry and why: they are the only per-request record that includes
-the requests Claude Code never writes to its transcripts.
+those batches and appends one row per usage event to that session's own
+session-scope file, data/claude/<session.id>.jsonl (USAGE_DATA_REFERENCE.md
+§1) - tagged `source: "claude_otel"`, with `observed_at` (epoch seconds of
+the event) as the join key. Events without a usable session id go to
+data/_unattributed/claude-otel.jsonl. See USAGE_DATA_SOURCES.md §3.7 for
+what the events carry and why: they are the only per-request record that
+includes the requests Claude Code never writes to its transcripts. They
+carry no quota percent, so they belong in session scope.
 
 Only usage events are kept (USAGE_EVENTS); prompt, tool and hook events are
 dropped on arrival. Each kept record is flattened losslessly: OTLP's typed
@@ -18,10 +22,12 @@ objects, and intValue (a string in OTLP/JSON) becomes an int.
 Stdlib only, bound to 127.0.0.1, run by its own KeepAlive LaunchAgent. If it
 is down, Claude Code drops the batches - it does not buffer them on disk.
 
-Usage: python3 otlp_receiver.py [--port 4318] [--out <jsonl path>]
+Usage: python3 otlp_receiver.py [--port 4318] [--data-dir <runtime data/>]
 """
 import argparse
 import json
+import os
+import re
 import sys
 import threading
 import time
@@ -31,7 +37,10 @@ from pathlib import Path
 # Deployed at ~/opt/agent-statusline/src/telemetry/ - three parents up is the
 # runtime root holding data/ (same layout as src/quota_polling/).
 RUNTIME_DIR = Path(__file__).resolve().parent.parent.parent
-DEFAULT_OUT = RUNTIME_DIR / "data" / "claude-telemetry.jsonl"
+DEFAULT_DATA_DIR = RUNTIME_DIR / "data"
+# Session ids become file names: plain UUID-like tokens only, never the
+# reserved account file.
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 USAGE_EVENTS = {"api_request", "api_error", "api_refusal", "api_retries_exhausted"}
 MAX_BODY_BYTES = 16 * 1024 * 1024
 
@@ -71,17 +80,27 @@ def usage_rows(d_payload: dict, received_at: int) -> list[dict]:
                 event = event.removeprefix("claude_code.")
                 if event not in USAGE_EVENTS:
                     continue
+                time_unix_nano = int(d_rec.get("timeUnixNano") or 0)
                 l_rows.append({
+                    "source": "claude_otel",
+                    "observed_at": time_unix_nano // 10**9,
                     "received_at": received_at,
                     "event": event,
-                    "time_unix_nano": int(d_rec.get("timeUnixNano") or 0),
+                    "time_unix_nano": time_unix_nano,
                     "attributes": d_attrs,
                     "resource": d_resource,
                 })
     return l_rows
 
 
-def make_handler(out_path: Path, lock: threading.Lock):
+def target_file(data_dir: Path, d_row: dict) -> Path:
+    sid = str(d_row["attributes"].get("session.id") or "")
+    if SESSION_ID_RE.match(sid) and sid != "account":
+        return data_dir / "claude" / f"{sid}.jsonl"
+    return data_dir / "_unattributed" / "claude-otel.jsonl"
+
+
+def make_handler(data_dir: Path, lock: threading.Lock):
     class Handler(BaseHTTPRequestHandler):
         def _reply(self, code: int, body: bytes = b"{}"):
             self.send_response(code)
@@ -106,12 +125,19 @@ def make_handler(out_path: Path, lock: threading.Lock):
             except (ValueError, TypeError, AttributeError) as exc:
                 print(f"bad payload: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
                 return self._reply(400)
-            if l_rows:
-                data = "".join(json.dumps(d) + "\n" for d in l_rows)
-                with lock:
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    with out_path.open("a") as f:
-                        f.write(data)
+            # One O_APPEND write() per row: the push path appends to the same
+            # session file from another process, and a single write() per
+            # line is what keeps the two from interleaving mid-line. The lock
+            # only serialises this receiver's own threads.
+            with lock:
+                for d_row in l_rows:
+                    path = target_file(data_dir, d_row)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+                    try:
+                        os.write(fd, (json.dumps(d_row) + "\n").encode())
+                    finally:
+                        os.close(fd)
             self._reply(200)
 
         def log_message(self, *args):
@@ -123,10 +149,10 @@ def make_handler(out_path: Path, lock: threading.Lock):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=4318)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     args = parser.parse_args()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(args.out, threading.Lock()))
-    print(f"listening on 127.0.0.1:{args.port}, writing {args.out}", flush=True)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(args.data_dir, threading.Lock()))
+    print(f"listening on 127.0.0.1:{args.port}, writing under {args.data_dir}", flush=True)
     server.serve_forever()
 
 

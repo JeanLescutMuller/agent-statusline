@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fetches Codex's plan-limit history from the ChatGPT backend about once a
-day and appends the raw response to data/codex-quota-history.jsonl, tagged
+day and appends the raw response to data/codex/account.jsonl, tagged
 `source: "codex_plan_limit_history"`.
 
 Why: it is the only sub-percent quota source for either agent. Each
@@ -23,7 +23,7 @@ attempt is tracked in a small state file rather than read back from the log,
 because the log's 16KB tail (_quota_common.tail_json_rows) holds only ~5 of
 the ~3KB rows poll_codex.py writes every minute.
 
-Existing readers of codex-quota-history.jsonl key on `codex_rate_limits` or
+Existing readers of data/codex/account.jsonl key on `codex_rate_limits` or
 on `source == "codex"`, so these rows are skipped by them, not misparsed.
 """
 import json
@@ -35,7 +35,7 @@ from pathlib import Path
 # Deployed at ~/opt/agent-statusline/src/quota_polling/ - three parents up
 # is the runtime root holding data/ and state/ (same as poll_codex.py).
 RUNTIME_DIR = Path(__file__).resolve().parent.parent.parent
-QUOTA_LOG_FILE = RUNTIME_DIR / "data" / "codex-quota-history.jsonl"
+QUOTA_LOG_FILE = RUNTIME_DIR / "data" / "codex" / "account.jsonl"  # percent-bearing, so account scope
 STATE_FILE = RUNTIME_DIR / "state" / "poll" / "codex_plan_limit_history"
 AUTH_FILE = Path.home() / ".codex" / "auth.json"
 URL = "https://chatgpt.com/backend-api/wham/usage/plan_limit_history?days=7"

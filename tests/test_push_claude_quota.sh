@@ -15,14 +15,15 @@ PUSH="$REPO_ROOT/src/statusline/push-claude-quota.sh"
 SEP=$'\034'
 TH_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-pushhome.XXXXXX")"
 trap 'rm -rf "$TH_HOME"' EXIT
-LOG="$TH_HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
+SESSION_DIR="$TH_HOME/opt/agent-statusline/data/claude"
+LOG="$SESSION_DIR/account.jsonl"
 STATE="$TH_HOME/opt/agent-statusline/state/quota/claude"
 TRANSCRIPT="$TH_HOME/transcript.jsonl"
 
 write_log() { mkdir -p "$(dirname "$LOG")"; printf '%s\n' "$1" > "$LOG"; }
 write_transcript() { printf '%s\n' "$1" > "$TRANSCRIPT"; }
 row_count() { [ -f "$LOG" ] && wc -l < "$LOG" | tr -d ' ' || echo 0; }
-reset() { rm -f "$LOG" "$STATE"; }
+reset() { rm -rf "$SESSION_DIR" "$STATE"; }
 
 run_push() {
     local err_file
@@ -154,31 +155,47 @@ IFS="$SEP" read -r st_five _ st_week _ _ _ < "$STATE"
 assert_eq "state 5h percent rounded" "24" "$st_five"
 assert_eq "state 7d percent rounded" "41" "$st_week"
 
-section "session cost -> logged with session_id, absent ones become null"
+section "session fields -> session file only; account row gets observed_by_session, never cost"
 reset
 write_transcript '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}'
-run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.01234
+run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.01234 "" "claude-opus-5-5"
 row="$(cat "$LOG")"
-assert_contains "session_id logged" "$row" '"session_id":"sess-1"'
-assert_contains "cumulative session cost logged" "$row" '"session_cost_usd":0.01234'
+assert_eq "account row names the observing session" "sess-1" "$(printf '%s' "$row" | jq -r .observed_by_session)"
+assert_not_contains "account row carries no cost" "$row" "session_cost_usd"
+assert_not_contains "account row has no bare session_id" "$row" '"session_id"'
+srow="$(cat "$SESSION_DIR/sess-1.jsonl")"
+assert_eq "one session row" "1" "$(wc -l < "$SESSION_DIR/sess-1.jsonl" | tr -d ' ')"
+assert_eq "cumulative session cost in the session file" "0.01234" "$(printf '%s' "$srow" | jq -c .session_cost_usd)"
+assert_eq "model id in the session file" "claude-opus-5-5" "$(printf '%s' "$srow" | jq -r .model_id)"
+assert_eq "same observed_at in both scopes (the join key)" \
+    "$(printf '%s' "$row" | jq .observed_at)" "$(printf '%s' "$srow" | jq .observed_at)"
+assert_eq "session row has no percent under any name" "" \
+    "$(printf '%s' "$srow" | jq -r '[paths | map(tostring) | join(".") | select(test("pct|percent|utiliz"; "i"))] | join(",")')"
 reset
 run_push "$TRANSCRIPT" 10 "" 20 ""
-row="$(cat "$LOG")"
-assert_contains "no session_id -> null" "$row" '"session_id":null'
-assert_contains "no cost -> null" "$row" '"session_cost_usd":null'
+assert_contains "no session id -> observed_by_session null" "$(cat "$LOG")" '"observed_by_session":null'
+assert_eq "no session id -> no session file" "0" "$(ls "$SESSION_DIR" | grep -vc '^account.jsonl$')"
 
-section "prompt_cache -> logged as the raw object, null when absent or invalid"
+section "a session id that isn't a plain token never becomes a file name"
 reset
-write_transcript '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}'
+run_push "$TRANSCRIPT" 10 "" 20 "" "../escape" 0.5
+assert_eq "account row still written" "1" "$(row_count)"
+assert_eq "no session file anywhere" "0" "$(find "$TH_HOME" -name '*escape*' | wc -l | tr -d ' ')"
+run_push "$TRANSCRIPT" 10 "" 20 "" "account" 0.5
+assert_eq "the reserved name 'account' is refused too - account.jsonl holds only account rows" "0" \
+    "$(grep -c session_cost_usd "$LOG")"
+
+section "prompt_cache -> session file, as the raw object, null when absent or invalid"
+reset
 run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.5 '{"warm":true,"misses":2,"miss_causes":{"system_prompt_changed":2},"hit_ratio":0.83}'
-row="$(cat "$LOG")"
 assert_eq "prompt_cache object logged unchanged" '{"warm":true,"misses":2,"miss_causes":{"system_prompt_changed":2},"hit_ratio":0.83}' \
-    "$(printf '%s' "$row" | jq -c .prompt_cache)"
+    "$(jq -c .prompt_cache "$SESSION_DIR/sess-1.jsonl")"
+assert_not_contains "never in the account row" "$(cat "$LOG")" "prompt_cache"
 reset
 run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.5 ""
-assert_contains "absent -> null" "$(cat "$LOG")" '"prompt_cache":null'
+assert_contains "absent -> null" "$(cat "$SESSION_DIR/sess-1.jsonl")" '"prompt_cache":null'
 reset
 run_push "$TRANSCRIPT" 10 "" 20 "" "sess-1" 0.5 "not json"
-assert_contains "invalid JSON -> null, row still written" "$(cat "$LOG")" '"prompt_cache":null'
+assert_contains "invalid JSON -> null, row still written" "$(cat "$SESSION_DIR/sess-1.jsonl")" '"prompt_cache":null'
 
 harness_summary

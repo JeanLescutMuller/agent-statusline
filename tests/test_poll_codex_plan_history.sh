@@ -12,7 +12,7 @@ RT="$TH_TMP2/rt"
 mkdir -p "$RT/src" "$TH_TMP2/home/.codex"
 cp -R "$REPO_ROOT/src/quota_polling" "$RT/src/"
 printf '{"tokens":{"access_token":"SECRET-TOKEN-xyz","account_id":"acct-1"}}' > "$TH_TMP2/home/.codex/auth.json"
-LOG="$RT/data/codex-quota-history.jsonl"
+LOG="$RT/data/codex/account.jsonl"
 STATE="$RT/state/poll/codex_plan_limit_history"
 
 # run_poller <python expression raised or returned by the fake urlopen>

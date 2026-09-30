@@ -14,14 +14,14 @@ pollers - living at `../src/quota_polling/` from this directory since a
 second 2026-08-31 split (see "Naming history" below) - each writing to
 its own per-provider file: `poll_claude.py` (renamed from
 `poll.py` — hits Anthropic's `GET /api/oauth/usage`, see below) appends to
-`data/claude-quota-history.jsonl` (shared with the statusline push path,
+`data/claude/account.jsonl` (shared with the statusline push path,
 disambiguated there by a `source` field); `poll_codex.py` (new — Codex has
 no plain HTTP usage endpoint; it speaks JSON-RPC to `codex app-server
 --stdio` instead, the same protocol Codex's own TUI statusline uses to
 render its rate-limit display — confirmed by reading
 `~/.codex/statusline-command.sh` and grepping `~/.codex/logs_2.sqlite` for
 `rpc.method="account/rateLimits/read"`, then live-tested end to end)
-appends to `data/codex-quota-history.jsonl`. `poll_all.py` runs both as
+appends to `data/codex/account.jsonl`. `poll_all.py` runs both as
 subprocesses and is what the LaunchAgent actually schedules — see
 `poll_all.py`'s docstring for why subprocess isolation over a plain
 import. Rows from before 2026-08-30 have no `source` field at all; they're
@@ -130,7 +130,7 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   endpoint itself on a 60s cache TTL, and running that opportunistically
   across every open session independently caused 429s during busy
   multi-session hours; the statusline side now pushes its own free
-  `rate_limits` reading directly into `data/claude-quota-history.jsonl`
+  `rate_limits` reading directly into `data/claude/account.jsonl`
   instead of polling at all (`source: "claude_statusline"` rows — this poller's own
   `source: "claude"` rows are a fallback now, not the primary path).
 - `poll_codex.py` self-throttles in three tiers (the middle one added
@@ -151,7 +151,7 @@ gotchas, investigation) is kept verbatim from that repo rather than rewritten.
   free local source - tier 2 is where the two pollers actually converge,
   both speeding up for the same "someone's watching" reason. One
   consequence worth knowing before you go looking for a bug:
-  `data/codex-quota-history.jsonl` will still show gaps (every row there is
+  `data/codex/account.jsonl` will still show gaps (every row there is
   `source: "codex"`, so the file simply goes quiet) during exactly the
   periods of heaviest Codex use — that's by design
   (tier 1), not lost coverage; the trajectory for those periods lives in
@@ -280,6 +280,15 @@ flags anything else as an orphan) - see the root `AGENTS.md`'s
 `uninstall.sh` then a fresh `install.sh`, not an automatic in-place
 migration.
 
+11. → `data/claude-quota-history.jsonl` / `data/codex-quota-history.jsonl`
+    (and the short-lived `data/claude-telemetry.jsonl`) became
+    `data/<agent>/account.jsonl` + `data/<agent>/<session-id>.jsonl` -
+    2026-09-30, one file per agent per scope, so a quota percent can never
+    sit in a session-scoped file (see `../USAGE_DATA_REFERENCE.md` §1).
+    Migrated once, by hand, with `split_by_scope.py` (originals kept under
+    `data/_archive/`). Push rows' `session_id` became `observed_by_session`
+    on account rows.
+
 ## Architecture: why the scripts are split this way
 
 This is the single most important design decision in this repo — don't
@@ -295,12 +304,12 @@ at `../src/quota_polling/` from this directory (split out 2026-08-31 - see
   Code statusline is live, settling to roughly every 5 minutes once idle.
   When it does poll, it does exactly one thing: append the full raw
   `/api/oauth/usage` response + selected HTTP headers to
-  `data/claude-quota-history.jsonl`, tagged `source: "claude"`. This
+  `data/claude/account.jsonl`, tagged `source: "claude"`. This
   **must** be polled: the endpoint has no history, so a missed reading is
   permanently lost - the self-throttling only skips ticks it judges
   unnecessary, it never disables polling outright.
 - **`poll_codex.py`** — same rationale, its own file
-  (`data/codex-quota-history.jsonl`, `source: "codex"` on every row -
+  (`data/codex/account.jsonl`, `source: "codex"` on every row -
   see "Naming history" for the 2026-08-31 per-provider split). Three
   tiers, not two: **skips** a tick if any local `~/.codex/sessions/**/*.jsonl`
   file was modified in the last 5 minutes, since an active session already
@@ -357,8 +366,8 @@ check `cleanupPeriodDays` is still 365 first — if it's been dropped back to
 
 Full JSON schema examples are in `README.md`. Quick summary:
 
-- `data/claude-quota-history.jsonl` — shared by two writers, disambiguated by `source` (split from a combined `data/quota-log.jsonl` on 2026-08-31 - see "Naming history"). Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../src/statusline/push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
-- `data/codex-quota-history.jsonl` — one writer, `poll_codex.py`; every row is `source: "codex"` (since 2026-08-30, the date the Codex poller landed - this file has no rows older than that). Codex poll rows: `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`.
+- `data/claude/account.jsonl` — shared by two writers, disambiguated by `source` (split from a combined `data/quota-log.jsonl` on 2026-08-31 - see "Naming history"). Claude poll rows: `{ts, iso, source: "claude", api, api_headers, error}`. Claude push rows (since the 2026-08-31 agent-statusline merge, one per real message, not one per poll tick): `{ts, iso, source: "claude_statusline", observed_at, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at}` — a reduced shape (no raw API response/headers, since it doesn't come from that endpoint at all) written by `../src/statusline/push-claude-quota.sh` in the same repo. `observed_at` is the transcript's own last message timestamp, not append time. Rows written before 2026-08-30 have no `source` key at all — treat missing as `"claude"`. Rows written before 2026-08-26 have an even older schema (`token_deltas`/`baseline` fields, no `api_headers`) — handle all shapes if reading full history.
+- `data/codex/account.jsonl` — one writer, `poll_codex.py`; every row is `source: "codex"` (since 2026-08-30, the date the Codex poller landed - this file has no rows older than that). Codex poll rows: `{ts, iso, source: "codex", codex_rate_limits, codex_usage, error}`.
 - `claude-token-events.jsonl` — lives in this directory directly, not `data/` (moved 2026-08-31 - see "Naming history": fully recomputable, so it doesn't need the durable-log treatment `data/` is for). One record per assistant message with usage, full fidelity (model, effort, session/cwd/sidechain identity, verbatim `usage` object including the `cache_creation` 5m/1h split and `output_tokens_details.thinking_tokens`). Deliberately excludes message content. Claude-only (see "Architecture" above).
 - `codex-token-events.jsonl` — also in this directory, not `data/`. Codex analogue, one record per local `token_count` event (roughly one per turn), full fidelity (session id/cwd, `total_token_usage`/`last_token_usage`, and the `rate_limits` snapshot logged alongside it). Built by `recompute_codex_events.py` from local session files only — no API call (see "Architecture" above).
 
@@ -455,7 +464,7 @@ must skip those.
   ~30-min backoff, and polled straight into it. Fixed by
   `_last_claude_log_row()`, which scans backward from the tail filtering on
   `source`. **The Codex interleaving is gone now that each poller has its
-  own file, but the same filter is still needed**: `claude-quota-history.jsonl`
+  own file, but the same filter is still needed**: `claude/account.jsonl`
   now interleaves `source:"claude"` poll rows with frequent
   `source:"claude_statusline"` push rows instead, and `_last_claude_log_row()`
   still has to skip past those. Any future per-poller state check on a

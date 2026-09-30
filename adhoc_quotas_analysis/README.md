@@ -148,7 +148,7 @@ parent README.md and the schema in this project's `AGENTS.md`) — this
 poller's `source: "claude"` rows are now a fallback for the gap that push
 path can't cover, not the primary signal. Codex never needed an equivalent
 push: the data's already durable on disk via the local session file, so
-writing it *again* into `codex-quota-history.jsonl` from the statusline
+writing it *again* into `codex/account.jsonl` from the statusline
 would just be a second copy of something that already exists - the
 heartbeat-driven speedup
 above is the whole fix needed on the Codex side.
@@ -161,9 +161,9 @@ JSON-RPC method on `codex app-server` (the same protocol its own TUI
 statusline uses), so it spawns `codex app-server --stdio`, does the
 `initialize` handshake, then calls `account/rateLimits/read` and
 `account/usage/read`. Each appends to its own per-provider file -
-`poll_claude.py` to `data/claude-quota-history.jsonl` (shared with the
+`poll_claude.py` to `data/claude/account.jsonl` (shared with the
 statusline push path, disambiguated there by a `source` field),
-`poll_codex.py` to `data/codex-quota-history.jsonl` - split from a single
+`poll_codex.py` to `data/codex/account.jsonl` - split from a single
 combined `data/quota-log.jsonl` on 2026-08-31 (see `AGENTS.md`'s "Naming
 history").
 
@@ -251,7 +251,7 @@ itself, `codex-token-events.jsonl` by `recompute_codex_events.py` — see
 unrecoverable-if-lost treatment, and nothing that produces them is
 deployed anywhere.
 
-**`claude-quota-history.jsonl`** and **`codex-quota-history.jsonl`**
+**`claude/account.jsonl`** and **`codex/account.jsonl`**
 (`data/`) — one
 record per poll tick (plus, for Claude, one per statusline push - see
 below), split by provider into these two files since 2026-08-31 (a single
@@ -259,8 +259,8 @@ combined `quota-log.jsonl` before that - see `AGENTS.md`'s "Naming
 history"). Rows carry a `source` field (added 2026-08-30; rows before that
 have no `source` key — they're all Claude, and predate the Codex poller
 entirely) so a row's origin is still identifiable within
-`claude-quota-history.jsonl`, which two writers share. Claude poll rows,
-in `claude-quota-history.jsonl`:
+`claude/account.jsonl`, which two writers share. Claude poll rows,
+in `claude/account.jsonl`:
 ```jsonc
 {
   "ts": 1787736614,                       // epoch seconds
@@ -302,7 +302,7 @@ reading the full file history. Rows where the Keychain read or the HTTP
 call failed have `api: null` (~11% of rows so far) — every consumer must
 skip those rather than assume a payload is present.
 
-Codex rows, in `codex-quota-history.jsonl` (since 2026-08-30):
+Codex rows, in `codex/account.jsonl` (since 2026-08-30):
 ```jsonc
 {
   "ts": 1788081319, "iso": "2026-08-30T09:15:19Z",
@@ -332,7 +332,7 @@ convention as `poll_claude.py`, with stages `spawn` (the `codex` binary
 couldn't be started), `timeout`, `rpc` (a JSON-RPC error response, e.g.
 not logged in), and `parse`.
 
-Claude push rows, also in `claude-quota-history.jsonl` (since the 2026-08-31
+Claude push rows, also in `claude/account.jsonl` (since the 2026-08-31
 agent-statusline merge), written by `../src/statusline/push-claude-quota.sh`
 on real Claude Code renders, not on a timer:
 ```jsonc

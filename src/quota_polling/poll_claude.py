@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Samples Anthropic's utilization API on a timer, because that side has no
 history - a missed reading is permanently lost. Appends one record per run
-to data/claude-quota-history.jsonl: the full raw GET /api/oauth/usage response,
+to data/claude/account.jsonl: the full raw GET /api/oauth/usage response,
 unfiltered, plus its HTTP response headers - or, when the reading can't be
 taken, an `error` object saying which stage failed and why. A missing
 reading is itself data (roughly 11% of rows historically), and "the token
@@ -37,8 +37,8 @@ Claude Code's own in-memory rate_limits state - no network call, never
 rate-limited. This poller still matters for the gap that push path can't
 cover: a session that hasn't sent its first message yet, or a stretch with
 no statusline rendering anywhere on the machine at all. Both sources share
-this same claude-quota-history.jsonl file (Codex has its own,
-codex-quota-history.jsonl - see poll_codex.py).
+this same data/claude/account.jsonl file (Codex has its own,
+data/codex/account.jsonl - see poll_codex.py).
 """
 import json
 import subprocess
@@ -55,7 +55,7 @@ import _quota_common
 # not parent.parent, or this would look for a nonexistent
 # src/data/ instead of the real sibling-of-src/ data/.
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-QUOTA_LOG_FILE = DATA_DIR / "claude-quota-history.jsonl"
+QUOTA_LOG_FILE = DATA_DIR / "claude" / "account.jsonl"  # account scope: the meter (USAGE_DATA_REFERENCE.md §1)
 
 # Same runtime root as HEARTBEAT_FILE below - the shared "latest known
 # quota" state file src/statusline/providers read (see cache.sh's
@@ -196,7 +196,7 @@ def _last_log_row() -> dict | None:
 def _last_claude_log_row() -> dict | None:
     """The last logged row from THIS poller specifically, not from
     ../statusline/push-claude-quota.sh's frequent claude_statusline
-    pushes into the same claude-quota-history.jsonl file - scanning back
+    pushes into the same data/claude/account.jsonl file - scanning back
     past intervening push rows is required here, reading the literal last
     line missed a real Retry-After backoff for a full tick once already
     (2026-08-30, back when this file also interleaved Codex rows: a Codex
@@ -231,7 +231,7 @@ def _should_poll(now: float) -> bool:
 
 
 def main() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    QUOTA_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     now = time.time()
     if not _should_poll(now):

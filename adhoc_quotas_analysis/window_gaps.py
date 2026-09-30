@@ -18,7 +18,7 @@ import json
 import os
 import statistics
 
-QUOTA_LOG = os.path.expanduser('~/opt/agent-statusline/data/claude-quota-history.jsonl')
+QUOTA_LOG = os.path.expanduser('~/opt/agent-statusline/data/claude/account.jsonl')
 TRANSCRIPTS = os.path.expanduser('~/.claude/projects/**/*.jsonl')
 GRID_S = 600           # 5h/7d `resets_at` is snapped to 10 min (5h) / 1 h (7d); 10 min is the common divisor
 GRID_NOISE_H = 1 / 3   # gaps up to 20 min are indistinguishable from grid rounding, not counted as idle

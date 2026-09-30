@@ -21,7 +21,9 @@ Two canonical files, which other projects that read or convert this data (`agent
 
 The dollar conversions both assume are derived in `adhoc_quotas_analysis/CONCLUSIONS.md`.
 
-`install.sh` also turns on Claude Code's OpenTelemetry export by adding a few keys to the `env` object of `~/.claude/settings.json` (only those keys; `uninstall.sh` removes them), and runs a local receiver on `127.0.0.1:4318` that writes per-request usage events to `data/claude-telemetry.jsonl` — see `USAGE_DATA_REFERENCE.md` §9.
+`install.sh` also turns on Claude Code's OpenTelemetry export by adding a few keys to the `env` object of `~/.claude/settings.json` (only those keys; `uninstall.sh` removes them), and runs a local receiver on `127.0.0.1:4318` that writes per-request usage events into each session's own `data/claude/<session-id>.jsonl` — see `USAGE_DATA_REFERENCE.md` §9.
+
+All usage data is split by agent and by **scope**: `data/<agent>/account.jsonl` holds the account-wide meter (quota percent), `data/<agent>/<session-id>.jsonl` holds one session's tokens and spend. **Quota percent is account-scope only**, never in a session file — see `USAGE_DATA_REFERENCE.md` §1.
 
 ## Usage
 
@@ -102,9 +104,9 @@ flowchart TB
     pushscript["src/statusline/push-claude-quota.sh
     runs when stdin has rate_limits, no network call"]
 
-    claudelog[("data/claude-quota-history.jsonl
+    claudelog[("data/claude/account.jsonl
     append-only history, 2 sources: claude / claude_statusline")]
-    codexlog[("data/codex-quota-history.jsonl
+    codexlog[("data/codex/account.jsonl
     1 source: codex")]
 
     subgraph pollers["Scheduled — LaunchAgent, every 60s"]
@@ -152,10 +154,10 @@ flowchart TB
     codexlog --> notebook
 ```
 
-Two independent write paths feed `claude-quota-history.jsonl`, disambiguated
+Two independent write paths feed `claude/account.jsonl`, disambiguated
 by `source`: the free per-render push (`claude_statusline`, rides existing
 traffic) and the fixed-cadence poll (`claude`, this account's only caller of
-that endpoint). `codex-quota-history.jsonl` has a single writer,
+that endpoint). `codex/account.jsonl` has a single writer,
 `poll_codex.py` — Codex has no equivalent free per-render push (see "Quota
 tracking" below for why). The coupling between the render path and the poll
 path is entirely file-based — a heartbeat file, a per-provider history log,
@@ -190,10 +192,17 @@ even though it reads/writes this same runtime's `data/`:
     │   │   ├── refresh-git-local.sh     branch/untracked/unstaged/staged/conflicts
     │   │   ├── refresh-git-remote.sh    ahead/behind
     │   │   └── refresh-metrics.sh       used/total/percent memory
-    │   └── quota_polling/                deployed poll_claude.py, poll_codex.py, poll_all.py
-    ├── data/
-    │   ├── claude-quota-history.jsonl    Claude poll + push quota log (see "Quota tracking")
-    │   └── codex-quota-history.jsonl     Codex poll quota log (see "Quota tracking")
+    │   ├── quota_polling/                deployed poll_claude.py, poll_codex.py, poll_codex_plan_history.py, poll_all.py
+    │   └── telemetry/                    deployed otlp_receiver.py
+    ├── providers/                        deployed adapters; ~/.claude and ~/.codex hold symlinks to these
+    ├── data/                             see USAGE_DATA_REFERENCE.md
+    │   ├── claude/
+    │   │   ├── account.jsonl             account scope: Claude poll + push meter readings (quota percent)
+    │   │   └── <session-id>.jsonl        session scope: push session rows + telemetry rows (never a percent)
+    │   ├── codex/
+    │   │   └── account.jsonl             account scope: Codex poll + plan-history rows
+    │   ├── _unattributed/                telemetry events with no usable session id
+    │   └── _archive/                     pre-2026-09-30 logs, kept after the one-time split_by_scope.py migration
     ├── state/
     │   ├── static/
     │   │   ├── hostname                  immutable short hostname
@@ -273,19 +282,19 @@ because no separate stable local quota endpoint has been established -
 `src/quota_polling/` + `adhoc_quotas_analysis/` (folded in from the former
 `agent-quota-tracker` repo, full git history preserved under the latter)
 empirically track both agents' quota percentages over time in two
-append-only, per-provider logs:
-`~/opt/agent-statusline/data/claude-quota-history.jsonl` and
-`data/codex-quota-history.jsonl` (split from a single combined
+append-only, per-agent account-scope logs (per-provider until 2026-09-30):
+`~/opt/agent-statusline/data/claude/account.jsonl` and
+`data/codex/account.jsonl` (split from a single combined
 `data/quota-log.jsonl` on 2026-08-31 - see `adhoc_quotas_analysis/AGENTS.md`'s
 "Naming history"). Three independent writers across the two files,
-disambiguated within `claude-quota-history.jsonl` by a `source` field,
+disambiguated within `claude/account.jsonl` by a `source` field,
 because the underlying data has genuinely different persistence properties:
 
 | File | `source` | Writer | Cadence | Why it exists |
 |---|---|---|---|---|
-| `claude-quota-history.jsonl` | `claude` | `src/quota_polling/poll_claude.py` (LaunchAgent, `GET /api/oauth/usage`) | ~60s while a statusline is live, ~5min idle | That endpoint has no history - a missed reading is permanently lost. Unreliable (~21% 429 rate historically; can lock out for 3+ days - see `adhoc_quotas_analysis/AGENTS.md`). |
-| `claude-quota-history.jsonl` | `claude_statusline` | `src/statusline/push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
-| `codex-quota-history.jsonl` | `codex` | `src/quota_polling/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`heartbeat/codex`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
+| `claude/account.jsonl` | `claude` | `src/quota_polling/poll_claude.py` (LaunchAgent, `GET /api/oauth/usage`) | ~60s while a statusline is live, ~5min idle | That endpoint has no history - a missed reading is permanently lost. Unreliable (~21% 429 rate historically; can lock out for 3+ days - see `adhoc_quotas_analysis/AGENTS.md`). |
+| `claude/account.jsonl` | `claude_statusline` | `src/statusline/push-claude-quota.sh` (every Claude render) | Bounded by real message pace, not render interval | Free: Claude Code already carries live `rate_limits` on every `/v1/messages` response, riding on the statusline's own stdin payload - no network call, and far more reliable than the poll endpoint. |
+| `codex/account.jsonl` | `codex` | `src/quota_polling/poll_codex.py` (LaunchAgent, `codex app-server` JSON-RPC) | Skips while a Codex session is actively writing its own local snapshot; else ~60s while a Codex statusline is rendering (`heartbeat/codex`, same mechanism as Claude's), backing off to ~5min once nothing is open | Codex has no plain HTTP usage endpoint, and unlike Claude's rate_limits, its local session file already durably records this - so instead of a statusline push, it just needed the same "someone is watching" speedup Claude's poller has. |
 
 Every `claude`/`codex` row also feeds `analysis.ipynb`'s research into what
 these percentages actually mean (they track dollar-weighted API cost, not

@@ -6,7 +6,7 @@
 # HOME is also overridden per call. push-claude-quota.sh (invoked as a
 # subprocess whenever the payload has rate_limits - see
 # test_push_claude_quota.sh for that script's own tests) hardcodes
-# $HOME/opt/agent-statusline/data/claude-quota-history.jsonl, and
+# $HOME/opt/agent-statusline/data/claude/, and
 # statusline_read_static falls back to $HOME/opt/bootstrap-home/bin/get_host_color
 # - pointing HOME at an empty temp dir makes both misses deterministic
 # instead of quietly depending on what's installed on the machine running
@@ -101,28 +101,34 @@ assert_contains "a later call with no rate_limits in the payload still shows the
 assert_contains "...and the cached 7d percent" "$TH_OUT" "70%"
 assert_contains "...still tagged X, from the earlier render's push" "$TH_OUT" "55% (X)"
 
-section "float percents and session cost reach the history log"
+section "float percents reach the account file, session cost and prompt_cache the session file"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-float.XXXXXX")"
 float_transcript="$TH_TMP/transcript-float.jsonl"
 printf '{"type":"assistant","timestamp":"2026-03-01T00:00:00.000Z"}\n' > "$float_transcript"
 float_payload="$TH_TMP/payload-float.json"
 jq --arg t "$float_transcript" '. + {transcript_path: $t,
+        model: {id: "claude-opus-5-5", display_name: "Opus"},
         cost: {total_cost_usd: 0.01234},
         prompt_cache: {warm: true, misses: 1, miss_causes: {tools_changed: 1}, hit_ratio: 0.5},
         rate_limits: {five_hour: {used_percentage: 23.5, resets_at: 1788091200},
                       seven_day: {used_percentage: 41.2, resets_at: 1788307200}}}' \
     "$FIXTURES/claude-payload.json" > "$float_payload"
-history_log="$TH_HOME/opt/agent-statusline/data/claude-quota-history.jsonl"
-rm -f "$history_log"
+history_log="$TH_HOME/opt/agent-statusline/data/claude/account.jsonl"
+session_log="$TH_HOME/opt/agent-statusline/data/claude/session-abc123.jsonl"
+rm -f "$history_log" "$session_log"
 run_claude "$float_payload" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 float_row="$(tail -n 1 "$history_log" 2>/dev/null)"
 assert_contains "5h percent logged unrounded" "$float_row" '"five_hour_pct":23.5'
 assert_contains "7d percent logged unrounded" "$float_row" '"seven_day_pct":41.2'
-assert_contains "session_id logged" "$float_row" '"session_id":"session-abc123"'
-assert_contains "session cost logged" "$float_row" '"session_cost_usd":0.01234'
+assert_contains "account row names the observing session" "$float_row" '"observed_by_session":"session-abc123"'
+assert_not_contains "account row carries no session cost" "$float_row" "session_cost_usd"
+session_row="$(tail -n 1 "$session_log" 2>/dev/null)"
+assert_contains "session cost in the session file" "$session_row" '"session_cost_usd":0.01234'
+assert_contains "model id in the session file" "$session_row" '"model_id":"claude-opus-5-5"'
 assert_eq "prompt_cache passed through from stdin unchanged" '{"warm":true,"misses":1,"miss_causes":{"tools_changed":1},"hit_ratio":0.5}' \
-    "$(printf '%s' "$float_row" | jq -c .prompt_cache)"
+    "$(printf '%s' "$session_row" | jq -c .prompt_cache)"
+assert_not_contains "session file carries no percent" "$session_row" "pct"
 assert_contains "display still shows the rounded 5h percent" "$TH_OUT" "24% (X)"
 assert_contains "display still shows the rounded 7d percent" "$TH_OUT" "41% (X)"
 

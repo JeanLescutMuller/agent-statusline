@@ -40,7 +40,14 @@ section "deploys the shared lib and provider adapters"
 assert_file_exists "lib deployed under ~/opt/agent-statusline" "$th_home/opt/agent-statusline/src/statusline/cache.sh"
 assert_file_exists "Claude quota push script deployed as part of the shared lib" \
     "$th_home/opt/agent-statusline/src/statusline/push-claude-quota.sh"
-assert_file_exists "Claude adapter deployed" "$th_home/.claude/statusline-command.sh"
+assert_eq "Claude adapter is a symlink into the runtime copy, not a real file" \
+    "$th_home/opt/agent-statusline/providers/claude-statusline-command.sh" "$(readlink "$th_home/.claude/statusline-command.sh")"
+assert_eq "Codex adapter is a symlink too" \
+    "$th_home/opt/agent-statusline/providers/codex-statusline-command.sh" "$(readlink "$th_home/.codex/statusline-command.sh")"
+diff -q "$REPO_ROOT/providers/claude-statusline-command.sh" "$th_home/.claude/statusline-command.sh" >/dev/null
+assert_status "the symlink resolves to the current provider" 0 $?
+assert_file_exists "data/claude/ created" "$th_home/opt/agent-statusline/data/claude"
+assert_file_exists "data/codex/ created" "$th_home/opt/agent-statusline/data/codex"
 diff -q "$REPO_ROOT/src/statusline/cache.sh" "$th_home/opt/agent-statusline/src/statusline/cache.sh" >/dev/null
 assert_status "deployed lib matches the repo source" 0 $?
 
@@ -76,6 +83,15 @@ section "idempotent re-run: second run reports 'ok', not '[+]', for unchanged fi
 run_install "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_not_contains "no file gets re-installed on an unchanged re-run" "$TH_OUT" "[+]"
+rm -rf "$th_home"
+
+section "a stale real file at the adapter path is replaced by the symlink"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+mkdir -p "$th_home/.claude"
+printf 'stale copy\n' > "$th_home/.claude/statusline-command.sh"
+run_install "$th_home"
+assert_eq "now a symlink" "$th_home/opt/agent-statusline/providers/claude-statusline-command.sh" \
+    "$(readlink "$th_home/.claude/statusline-command.sh")"
 rm -rf "$th_home"
 
 section "telemetry env merge leaves every other settings key alone"

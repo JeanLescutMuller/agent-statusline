@@ -35,6 +35,7 @@ agent-statusline/
 ├── adhoc_quotas_analysis/        # quota research: folded in from the former agent-quota-tracker repo,
 │                                 # full git history preserved under this prefix (see its own AGENTS.md)
 │   ├── split_quota_log.py        # one-time, idempotent log-split migration, run by hand only if you still have an old combined data/quota-log.jsonl
+│   ├── split_by_scope.py         # one-time, idempotent migration to data/<agent>/{account,<session-id>}.jsonl (2026-09-30), run by hand
 │   ├── recompute_codex_events.py # not scheduled, run by hand (Claude side is now inline in analysis.ipynb's own cells)
 │   ├── window_gaps.py            # read-only, run by hand: 5h/7d window gap analysis behind CONCLUSIONS.md
 │   ├── quota_model.py            # read-only, run by hand: %/token/USD conversions + Codex window timing behind CONCLUSIONS.md
@@ -121,16 +122,20 @@ The coupling between `src/quota_polling/`/`adhoc_quotas_analysis/` and
 `src/statusline/`/`providers/` is file-based, not a `source`/import, and
 runs through **two different kinds of file** that are easy to conflate:
 
-- `data/claude-quota-history.jsonl` / `data/codex-quota-history.jsonl` — one
-  file **per provider** (split from a single combined `data/quota-log.jsonl`
-  on 2026-08-31 — see `adhoc_quotas_analysis/AGENTS.md`'s "Naming history"),
-  *not* one file per writer. Within `claude-quota-history.jsonl` specifically,
-  two independent writers both append, disambiguated by a `source` field:
-  `src/quota_polling/poll_claude.py` (`source: "claude"`) and
-  `src/statusline/push-claude-quota.sh` (`source: "claude_statusline"`).
-  Append-only, unconditional, no dedup, no ordering guarantee across the two
-  writers — nothing reads this live any more (see below), it exists purely
-  as raw material for `adhoc_quotas_analysis/analysis.ipynb`'s research.
+- `data/<agent>/account.jsonl` and `data/<agent>/<session-id>.jsonl` — one
+  file per agent per **scope** (since 2026-09-30; per provider before that,
+  see `adhoc_quotas_analysis/AGENTS.md`'s "Naming history"), *not* one file
+  per writer. **Hard rule: quota percent is account-scope only** — never in
+  a session file, under any name; account rows never carry per-session cost
+  (`USAGE_DATA_REFERENCE.md` §1). Within `claude/account.jsonl`, two writers
+  append, disambiguated by `source`: `src/quota_polling/poll_claude.py`
+  (`"claude"`) and `src/statusline/push-claude-quota.sh`
+  (`"claude_statusline"`). Session files get the push path's session rows
+  and the telemetry receiver's per-request rows (`"claude_otel"`). Globs over
+  `data/<agent>/*.jsonl` must exclude `account.jsonl`. Append-only,
+  unconditional, no dedup, no ordering guarantee across writers — nothing
+  reads these live, they are raw material for research and downstream
+  projects.
 - `state/quota/claude` / `state/quota/codex` — a single small file per
   provider holding only the *latest known reading*. The Claude file has six
   FS-delimited fields (`five_pct/five_reset/week_pct/week_reset/source/observed_at`,

@@ -59,12 +59,31 @@ for f in "$SCRIPT_DIR"/src/statusline/*.sh; do
     _deploy "$f" "$LIB_DIR/$(basename "$f")"
 done
 
+# Symlink into the runtime copy. Used for the OS/app-mandated locations
+# (~/.claude, ~/.codex), which hold only a symlink back into ~/opt - a real
+# file there went stale unnoticed once (2026-09-30), and a symlink cannot.
+_link() {
+    local real="$1" link="$2"
+    mkdir -p "$(dirname "$link")"
+    if [ -L "$link" ] && [ "$(readlink "$link")" = "$real" ]; then
+        ok "$link -> $real"
+        return
+    fi
+    ln -sfn "$real" "$link"
+    installed "$link -> $real"
+}
+
 step "provider adapters"
-_deploy "$SCRIPT_DIR/providers/claude-statusline-command.sh" "$HOME/.claude/statusline-command.sh"
-_deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
+_deploy "$SCRIPT_DIR/providers/claude-statusline-command.sh" "$RUNTIME/providers/claude-statusline-command.sh"
+_deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$RUNTIME/providers/codex-statusline-command.sh"
+_link "$RUNTIME/providers/claude-statusline-command.sh" "$HOME/.claude/statusline-command.sh"
+_link "$RUNTIME/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
 
 step "runtime state"
-mkdir -p "$RUNTIME/state/static" "$RUNTIME/locks" "$RUNTIME/logs" "$RUNTIME/data"
+# data/<agent>/account.jsonl + data/<agent>/<session-id>.jsonl - see
+# USAGE_DATA_REFERENCE.md §1. No migration here: an old-layout data/ is
+# converted once, by hand, with adhoc_quotas_analysis/split_by_scope.py.
+mkdir -p "$RUNTIME/state/static" "$RUNTIME/locks" "$RUNTIME/logs" "$RUNTIME/data/claude" "$RUNTIME/data/codex"
 ok "runtime state"
 
 step "quota polling"

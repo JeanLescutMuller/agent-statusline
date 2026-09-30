@@ -72,7 +72,9 @@ esac
 
 step "provider adapters"
 for target in "$HOME/.claude/statusline-command.sh" "$HOME/.codex/statusline-command.sh"; do
-    if [ -f "$target" ]; then
+    # -L too: a symlink into the runtime tree (what install.sh deploys) is
+    # removed even if its target is already gone.
+    if [ -L "$target" ] || [ -f "$target" ]; then
         rm -f "$target"
         installed "removed $target"
     else
@@ -92,7 +94,7 @@ if [ -d "$RUNTIME" ]; then
     # retries clear a transient collision in practice; this is not a lock
     # against every future render, just enough slack for whatever render
     # was in flight when this script started.
-    known_targets="src state locks logs"
+    known_targets="src providers state locks logs"
     for target in $known_targets; do
         for attempt in 1 2 3; do
             rm -rf "$RUNTIME/$target" 2>/dev/null
@@ -105,6 +107,7 @@ if [ -d "$RUNTIME" ]; then
     # rmdir only succeeds on an empty directory - an install that never
     # actually collected data (or never built the Codex patch) leaves
     # nothing behind; real content in either is left in place and reported.
+    rmdir "$RUNTIME/data/claude" "$RUNTIME/data/codex" 2>/dev/null
     rmdir "$RUNTIME/data" 2>/dev/null
     [ -d "$RUNTIME/data" ] && skip "preserved $RUNTIME/data (irreplaceable quota history)"
     rmdir "$RUNTIME/codex-patch" 2>/dev/null
