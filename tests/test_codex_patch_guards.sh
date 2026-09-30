@@ -61,10 +61,14 @@ assert_not_contains "does not strip the signed official code-mode host" "$script
     'strip "$destination/bin/codex" "$destination/bin/codex-code-mode-host"'
 assert_contains "smoke-tests codex-code-mode-host before marking success" "$script_text" \
     '"$destination/bin/codex-code-mode-host" --help'
-assert_contains "builds in a scratch dir under TMPDIR, never under the persistent runtime dir" \
-    "$script_text" '${TMPDIR:-/tmp}/agent-statusline-codex-patch-build'
+assert_contains "lets Cargo parallelize fresh-version builds" "$script_text" \
+    'cargo build --release -p codex-cli'
+assert_not_contains "does not force every fresh build through one compiler job" "$script_text" \
+    'cargo build --release -j 1'
+assert_contains "builds in a fixed scratch dir under /tmp, never under the persistent runtime dir" \
+    "$script_text" 'scratch_dir="/tmp/agent-statusline-codex-patch-build"'
 assert_not_contains "scratch dir has a fixed name, not a fresh mktemp per run (never more than one on disk)" \
-    "$script_text" 'mktemp -d "${TMPDIR:-/tmp}/agent-statusline-codex-patch'
+    "$script_text" 'mktemp -d "/tmp/agent-statusline-codex-patch'
 assert_contains "wipes the scratch dir before building, so a crash/kill-9 run can't leave a second one behind" \
     "$script_text" 'rm -rf "$scratch_dir"
 mkdir -p "$scratch_dir"'

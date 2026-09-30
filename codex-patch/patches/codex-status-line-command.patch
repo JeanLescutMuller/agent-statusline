@@ -40,14 +40,11 @@ index 4783f55..38371f3 100644
  use ratatui::prelude::Stylize;
  use ratatui::style::Color;
  use ratatui::style::Style;
-@@ -55,6 +56,7 @@ impl StatusLineAccent {
-             StatusLineItem::ApprovalMode => Self::Mode,
-             StatusLineItem::ThreadTitle | StatusLineItem::WorkspaceHeadline => Self::Thread,
+@@ -57,3 +58,4 @@ impl StatusLineAccent {
              StatusLineItem::TaskProgress => Self::Progress,
 +            StatusLineItem::Custom => Self::Usage,
          }
      }
- 
 @@ -121,7 +123,14 @@ where
          } else {
              style
@@ -110,16 +107,13 @@ diff --git a/codex-rs/tui/src/chatwidget/status_surfaces.rs b/codex-rs/tui/src/c
 index e79c0d3..7ac9206 100644
 --- a/codex-rs/tui/src/chatwidget/status_surfaces.rs
 +++ b/codex-rs/tui/src/chatwidget/status_surfaces.rs
-@@ -22,6 +22,9 @@ use codex_utils_sandbox_summary::summarize_permission_profile;
- 
+@@ -24,3 +24,5 @@ use codex_utils_sandbox_summary::summarize_permission_profile;
  use super::status_state::TerminalTitleStatusKind;
- 
+-
 +mod status_line_command;
 +pub(super) use status_line_command::StatusLineCommandState;
 +
  /// Items shown in the terminal title when the user has not configured a
- /// custom selection. Intentionally minimal: activity indicator + project name.
- pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["activity", "project-name"];
 @@ -190,6 +193,15 @@ impl ChatWidget {
              self.request_status_line_workspace_headline_if_due(Instant::now());
          }
@@ -136,8 +130,7 @@ index e79c0d3..7ac9206 100644
          if selections.uses_thread_usage() {
              self.ensure_thread_usage_requested();
          } else {
-@@ -786,6 +798,12 @@ impl ChatWidget {
-             ),
+@@ -787,5 +799,11 @@ impl ChatWidget {
              StatusLineItem::WorkspaceHeadline => self.status_line_workspace_headline.clone(),
              StatusLineItem::TaskProgress => self.terminal_title_task_progress(),
 +            StatusLineItem::Custom => self

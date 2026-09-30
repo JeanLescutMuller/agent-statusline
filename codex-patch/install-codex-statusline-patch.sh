@@ -58,7 +58,7 @@ fi
 # cached one such tree per Codex version forever under
 # $RUNTIME/source-<version>/ and never cleaned any of them up - see git
 # history if reviving cross-run build-cache reuse is ever worth revisiting.
-scratch_dir="${TMPDIR:-/tmp}/agent-statusline-codex-patch-build"
+scratch_dir="/tmp/agent-statusline-codex-patch-build"
 rm -rf "$scratch_dir"
 mkdir -p "$scratch_dir"
 trap 'rm -rf "$scratch_dir"' EXIT
@@ -87,7 +87,9 @@ code_mode_host_source="$(dirname "$CODEX_BIN")/codex-code-mode-host"
 printf 'Building quietly (details: %s)...\n' "$BUILD_LOG"
 (
     cd "$source_dir/codex-rs"
-    CARGO_PROFILE_RELEASE_LTO=false cargo build --release -j 1 -p codex-cli
+    # Use Cargo's normal parallelism for fresh-version builds. Callers can set
+    # CARGO_BUILD_JOBS when they deliberately need a lower resource ceiling.
+    CARGO_PROFILE_RELEASE_LTO=false cargo build --release -p codex-cli
 ) >>"$BUILD_LOG" 2>&1 || die "compiler failed"
 
 built="$source_dir/codex-rs/target/release/codex"
