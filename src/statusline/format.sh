@@ -163,7 +163,7 @@ statusline_severity_color() {
 statusline_bar() {
     local pct="$1" width="$2" color="$3" output_name="$4"
     local filled empty fill pad result
-    filled=$((pct * width / 100))
+    filled=$(((pct * width + 50) / 100))
     [ "$filled" -gt "$width" ] && filled="$width"
     empty=$((width - filled))
     printf -v fill '%*s' "$filled" ''
