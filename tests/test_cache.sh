@@ -249,34 +249,29 @@ five_pct=""; quota_source=""
 statusline_overlay_freshest_quota "$TH_TMP/garbage" "$own"
 assert_eq "an unreadable file never wins" "42 X" "$five_pct $quota_source"
 
-section "a newer reading lacking a window keeps that window's known value"
-statusline_write_quota_if_newer "$own" "" "" 60 "" X 800
-IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 v2 v3 _ _ v6 < "$own"
-assert_eq "write: 5h carried over from the older reading, 7d and observed_at updated" "42 60 800" "$v1 $v3 $v6"
-statusline_write_quota_if_newer "$other" "" "" 70 "" P 900
-five_pct=""; week_pct=""; quota_source=""
-statusline_overlay_freshest_quota "$own" "$other"
-assert_eq "overlay: 7d from the newest file, 5h kept from it too (carried over at write)" "43 70 P" "$five_pct $week_pct $quota_source"
-printf '%s\n' "${STATUSLINE_FIELD_SEPARATOR}${STATUSLINE_FIELD_SEPARATOR}71${STATUSLINE_FIELD_SEPARATOR}${STATUSLINE_FIELD_SEPARATOR}P${STATUSLINE_FIELD_SEPARATOR}900" > "$other"
-five_pct=""; week_pct=""
-statusline_overlay_freshest_quota "$own" "$other"
-assert_eq "overlay: the newest file has no 5h at all -> the older file's 5h shows" "42 71" "$five_pct $week_pct"
-
 section "statusline_transcript_observed_at"
 t="$TH_TMP/transcript.jsonl"
 printf '%s\n' '{"type":"user","timestamp":"2026-01-01T10:00:00.000Z"}' \
     '{"type":"assistant","timestamp":"2026-01-01T10:00:05.500Z"}' '{"type":"summary"}' > "$t"
 statusline_transcript_observed_at "$t" out
-assert_eq "last timestamp, skipping trailing entries without one" "1767261605" "$out"
-printf '%s\n' '{"timestamp":"2026-07-01T10:00:00.250Z"}' > "$t"
+assert_eq "last assistant timestamp, skipping entries without one" "1767261605" "$out"
+printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T10:00:05Z"}' \
+    '{"type":"attachment","timestamp":"2026-01-03T00:00:00Z"}' '{"type":"user","timestamp":"2026-01-03T00:00:01Z"}' \
+    '{"type":"ai-title"}' '{"type":"mode"}' > "$t"
+statusline_transcript_observed_at "$t" out
+assert_eq "later non-assistant entries don't make a stale reading look fresh" "1767261605" "$out"
+{ printf 'x%.0s' $(seq 1 300000); printf '\n'; printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T10:00:05Z"}'; } > "$t"
+statusline_transcript_observed_at "$t" out
+assert_eq "a line cut by the 256 KB tail is skipped, not fatal" "1767261605" "$out"
+printf '%s\n' '{"type":"assistant","timestamp":"2026-07-01T10:00:00.250Z"}' > "$t"
 TZ=Europe/Paris statusline_transcript_observed_at "$t" out
 assert_eq "exact UTC under a daylight-saving zone (jq 1.6 regression)" "1782900000" "$out"
-printf '%s\n' '{"timestamp":"2026-07-01T10:00:00+00:00"}' > "$t"
+printf '%s\n' '{"type":"assistant","timestamp":"2026-07-01T10:00:00+00:00"}' > "$t"
 statusline_transcript_observed_at "$t" out
 assert_eq "+00:00 suffix accepted" "1782900000" "$out"
-printf '%s\n' '{"type":"summary"}' > "$t"
+printf '%s\n' '{"type":"user","timestamp":"2026-07-01T10:00:00Z"}' '{"type":"summary"}' > "$t"
 statusline_transcript_observed_at "$t" out
-assert_eq "no timestamp -> empty" "" "$out"
+assert_eq "no assistant message -> empty (unknown age)" "" "$out"
 statusline_transcript_observed_at "$TH_TMP/nope.jsonl" out
 assert_eq "missing transcript -> empty" "" "$out"
 

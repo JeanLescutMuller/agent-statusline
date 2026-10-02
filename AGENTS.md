@@ -71,7 +71,7 @@ Both are optional: absent, the statusline still renders.
 - **agent-usage-tracker** (`~/dev/agent-usage-tracker`, split out of this repo on 2026-09-30 - git history before that is here, up to `d744951`). The contract is three files, specified in README.md's "agent-usage-tracker" section: the Claude provider pipes its raw stdin payload into the tracker's `bin/ingest-claude-statusline.sh` and reads back its `state/quota/claude`; the tracker's pollers read this repo's `state/heartbeat/*` mtimes. Rules that keep it clean:
   - Only `providers/claude-statusline-command.sh` references the tracker (enforced by `tests/test_repo_hygiene.sh`), and neither project writes into the other's tree.
   - Forward the payload unchanged - never pick fields for the tracker here, so what it records can change without touching this repo.
-  - Never let the tracker break or freeze a render: its output and exit status are ignored, and its state file is shown only when its `observed_at` beats this repo's own `state/quota/claude`. The statusline must stay complete on its own (own cross-session cache, `–` when nothing is known).
+  - Never let the tracker break or freeze a render: its output and exit status are ignored, and its state file is used only when it holds a poller reading (`P`) whose `observed_at` beats this repo's own `state/quota/claude` - its `X` readings duplicate our own stdin, stamped by its rules, not ours. The statusline must stay complete on its own (own cross-session cache, `–` when nothing is known).
   - The state file's six-field format and the heartbeat path are a shared format; changing either is a change in both repos.
 
 ## Tests
