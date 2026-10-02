@@ -71,24 +71,48 @@ assert_ne "back-to-back renders show different spinner frames" "$spin_a" "$spin_
 assert_contains "line 3 shows the context percentage" "$TH_OUT" "42%"
 assert_contains "line 3 shows the 5h percentage" "$TH_OUT" "55%"
 assert_contains "line 3 shows the 7d percentage" "$TH_OUT" "70%"
-assert_not_contains "no tracker installed: no origin tag, the stdin value as-is" "$TH_OUT" "55% ("
+assert_contains "5h is tagged X - this render's own reading, via the own cache" "$TH_OUT" "55% (X)"
 
 section "full payload outside a git repo"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 assert_not_contains "no git segment when cwd isn't a repo" "$TH_OUT" "🌿"
 assert_contains "cwd is still shown and collapsed" "$TH_OUT" "~/plain"
 
-section "minimal payload (nulls/missing fields)"
+section "minimal payload (nulls/missing fields), nothing cached anywhere"
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-min.XXXXXX")"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_contains "model defaults to Claude" "$TH_OUT" "🤖 Claude"
 assert_contains "context defaults to 0%" "$TH_OUT" "0%"
+line3="$(printf '%s\n' "$TH_OUT" | sed -n 3p)"
+assert_match "no quota reading anywhere: 5h shows a dash" "$line3" '5h.*–'
+assert_match "...and 7d too" "$line3" '7d.*–'
+assert_eq "...never a made-up 0% (only the context segment has a %)" "1" "$(printf '%s' "$line3" | grep -o '%' | wc -l | tr -d ' ')"
+assert_file_missing "no reading, so no own cache file written" "$STATUSLINE_RUNTIME_DIR/state/quota/claude"
 
-section "agent-usage-tracker absent: stdin values are displayed"
-STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-notracker.XXXXXX")"
-run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
-assert_contains "5h from stdin" "$TH_OUT" "55%"
-assert_contains "7d from stdin" "$TH_OUT" "70%"
+section "agent-usage-tracker absent: the own cache still makes sessions converge"
+# Three "sessions" with their own stdin readings: A's last message was
+# earliest, B's later, C hasn't sent one. Whichever reading is freshest
+# (transcript timestamp) is shown by all of them.
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-conv.XXXXXX")"
+payload_for() {
+    local pct="$1" ts="$2" out="$3" transcript
+    transcript="$TH_TMP/transcript-$pct.jsonl"
+    printf '{"type":"assistant","timestamp":"%s"}\n' "$ts" > "$transcript"
+    jq --arg t "$transcript" --argjson p "$pct" \
+        '. + {transcript_path: $t, rate_limits: (.rate_limits + {five_hour: {used_percentage: $p, resets_at: 1788091200}})}' \
+        "$FIXTURES/claude-payload.json" > "$out"
+}
+payload_for 24 "2026-01-01T00:00:00.000Z" "$TH_TMP/payload-a.json"
+payload_for 25 "2026-01-01T00:05:00.000Z" "$TH_TMP/payload-b.json"
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_contains "session A shows its own 24%" "$TH_OUT" "24% (X)"
+run_claude "$TH_TMP/payload-b.json" "$plain_dir"
+assert_contains "session B shows its own, newer 25%" "$TH_OUT" "25% (X)"
+run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
+assert_contains "session C (no message yet) shows B's reading, not a dash" "$TH_OUT" "25% (X)"
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_contains "session A re-renders its stale 24% but shows B's 25%" "$TH_OUT" "25% (X)"
 assert_file_missing "nothing is created under the tracker's directory" "$AGENT_USAGE_TRACKER_DIR"
 assert_file_exists "every render touches the liveness heartbeat the tracker's pollers read" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
@@ -107,24 +131,30 @@ STUB
     chmod +x "$dir/bin/ingest-claude-statusline.sh"
 }
 
-section "agent-usage-tracker present: the raw payload goes in, its state file comes out"
+section "agent-usage-tracker present: the raw payload goes in, a fresher tracker reading wins"
+# A's own reading is from 2026-01-01T00:00Z (1767225600); the tracker's
+# poll is later.
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-tracker.XXXXXX")"
 AGENT_USAGE_TRACKER_DIR="$TH_TMP/tracker"
-stub_tracker "$AGENT_USAGE_TRACKER_DIR" "61${SEP}1788091200${SEP}72${SEP}1788307200${SEP}P${SEP}500"
-sed "s#__CWD__#$plain_dir#" "$FIXTURES/claude-payload.json" > "$TH_TMP/sent.json"
-run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
+stub_tracker "$AGENT_USAGE_TRACKER_DIR" "61${SEP}1788091200${SEP}72${SEP}1788307200${SEP}P${SEP}1767229200"
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_eq "the ingest script receives the stdin payload unchanged (bar the trailing newline)" \
-    "$(cat "$TH_TMP/sent.json")" "$(cat "$AGENT_USAGE_TRACKER_DIR/received.json")"
-assert_contains "5h comes from the tracker's state file, with its origin tag" "$TH_OUT" "61% (P)"
+    "$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json")" "$(cat "$AGENT_USAGE_TRACKER_DIR/received.json")"
+assert_contains "5h comes from the tracker's newer reading, with its tag" "$TH_OUT" "61% (P)"
 assert_contains "7d too" "$TH_OUT" "72% (P)"
-
-section "the tracker's state file is read before the payload's own values, whatever they say"
 rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_file_exists "a payload without rate_limits is forwarded too - the tracker decides" \
     "$AGENT_USAGE_TRACKER_DIR/received.json"
-assert_contains "a render with no rate_limits still shows the account's reading" "$TH_OUT" "61% (P)"
+assert_contains "a render with no rate_limits shows the freshest reading" "$TH_OUT" "61% (P)"
+
+section "a stale tracker file never freezes the display (e.g. a broken ingest script)"
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-stale.XXXXXX")"
+stub_tracker "$AGENT_USAGE_TRACKER_DIR" "99${SEP}${SEP}99${SEP}${SEP}X${SEP}1000"
+run_claude "$TH_TMP/payload-b.json" "$plain_dir"
+assert_contains "this render's newer own reading is shown" "$TH_OUT" "25% (X)"
+assert_not_contains "the stale 99% is not" "$TH_OUT" "99%"
 
 section "a failing ingest script never breaks the render"
 cat > "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh" <<'STUB'

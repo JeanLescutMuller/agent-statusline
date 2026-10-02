@@ -189,6 +189,97 @@ assert_eq "writes the timestamp" "1000" "$(cat "${cf}.timestamp")"
 statusline_write_values_if_stale "$cf" 60 values-key 5 1010 x y z
 assert_eq "fresh cache: write is skipped, old values remain" "a${STATUSLINE_FIELD_SEPARATOR}b${STATUSLINE_FIELD_SEPARATOR}c" "$(cat "$cf")"
 
+section "statusline_write_quota_if_newer"
+th_tmp_runtime
+source "$REPO_ROOT/src/statusline/cache.sh"
+statusline_cache_init
+qc="$STATUSLINE_STATE_DIR/quota/claude"
+
+statusline_write_quota_if_newer "$qc" 42 1700000000 55 1700100000 P 500
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 v2 v3 v4 v5 v6 < "$qc"
+assert_eq "first write: 5h pct" "42" "$v1"
+assert_eq "first write: 5h reset" "1700000000" "$v2"
+assert_eq "first write: 7d pct" "55" "$v3"
+assert_eq "first write: 7d reset" "1700100000" "$v4"
+assert_eq "first write: source tag" "P" "$v5"
+assert_eq "first write: observed_at" "500" "$v6"
+
+statusline_write_quota_if_newer "$qc" 10 "" 20 "" X 400
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 _ _ _ v5 v6 < "$qc"
+assert_eq "an older observed_at does not overwrite" "42" "$v1"
+assert_eq "...source tag unchanged either" "P" "$v5"
+assert_eq "...observed_at unchanged" "500" "$v6"
+
+statusline_write_quota_if_newer "$qc" 10 "" 20 "" X 500
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 _ _ _ v5 _ < "$qc"
+assert_eq "an equal observed_at does not overwrite either (strictly newer only)" "42" "$v1"
+assert_eq "...source tag unchanged" "P" "$v5"
+
+statusline_write_quota_if_newer "$qc" 99 1700200000 88 1700300000 X 600
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 v2 v3 v4 v5 v6 < "$qc"
+assert_eq "a genuinely newer observed_at overwrites" "99" "$v1"
+assert_eq "...every field, not just the tag" "1700200000" "$v2"
+assert_eq "...source tag flips to the new writer" "X" "$v5"
+assert_eq "...observed_at advances" "600" "$v6"
+
+section "statusline_overlay_freshest_quota"
+th_tmp_runtime
+source "$REPO_ROOT/src/statusline/cache.sh"
+statusline_cache_init
+own="$STATUSLINE_STATE_DIR/quota/claude"
+other="$TH_TMP/tracker-claude"
+statusline_write_quota_if_newer "$own" 40 "" 50 "" X 500
+statusline_write_quota_if_newer "$other" 41 "" 51 "" P 600
+five_pct=""; week_pct=""; quota_source=""
+statusline_overlay_freshest_quota "$own" "$other"
+assert_eq "the newer file wins, whichever argument it is" "41 P" "$five_pct $quota_source"
+statusline_write_quota_if_newer "$own" 42 "" 52 "" X 700
+five_pct=""; quota_source=""
+statusline_overlay_freshest_quota "$own" "$other"
+assert_eq "a stale second file never freezes the first" "42 X" "$five_pct $quota_source"
+statusline_write_quota_if_newer "$other" 43 "" 53 "" P 700
+five_pct=""; quota_source=""
+statusline_overlay_freshest_quota "$own" "$other"
+assert_eq "on a tie, the first argument wins" "42 X" "$five_pct $quota_source"
+five_pct="7"; quota_source=""
+statusline_overlay_freshest_quota "$own.missing" "$TH_TMP/also-missing"
+assert_eq "no file at all: caller's values untouched" "7 " "$five_pct $quota_source"
+printf 'garbage\n' > "$TH_TMP/garbage"
+five_pct=""; quota_source=""
+statusline_overlay_freshest_quota "$TH_TMP/garbage" "$own"
+assert_eq "an unreadable file never wins" "42 X" "$five_pct $quota_source"
+
+section "a newer reading lacking a window keeps that window's known value"
+statusline_write_quota_if_newer "$own" "" "" 60 "" X 800
+IFS="$STATUSLINE_FIELD_SEPARATOR" read -r v1 v2 v3 _ _ v6 < "$own"
+assert_eq "write: 5h carried over from the older reading, 7d and observed_at updated" "42 60 800" "$v1 $v3 $v6"
+statusline_write_quota_if_newer "$other" "" "" 70 "" P 900
+five_pct=""; week_pct=""; quota_source=""
+statusline_overlay_freshest_quota "$own" "$other"
+assert_eq "overlay: 7d from the newest file, 5h kept from it too (carried over at write)" "43 70 P" "$five_pct $week_pct $quota_source"
+printf '%s\n' "${STATUSLINE_FIELD_SEPARATOR}${STATUSLINE_FIELD_SEPARATOR}71${STATUSLINE_FIELD_SEPARATOR}${STATUSLINE_FIELD_SEPARATOR}P${STATUSLINE_FIELD_SEPARATOR}900" > "$other"
+five_pct=""; week_pct=""
+statusline_overlay_freshest_quota "$own" "$other"
+assert_eq "overlay: the newest file has no 5h at all -> the older file's 5h shows" "42 71" "$five_pct $week_pct"
+
+section "statusline_transcript_observed_at"
+t="$TH_TMP/transcript.jsonl"
+printf '%s\n' '{"type":"user","timestamp":"2026-01-01T10:00:00.000Z"}' \
+    '{"type":"assistant","timestamp":"2026-01-01T10:00:05.500Z"}' '{"type":"summary"}' > "$t"
+statusline_transcript_observed_at "$t" out
+assert_eq "last timestamp, skipping trailing entries without one" "1767261605" "$out"
+printf '%s\n' '{"timestamp":"2026-07-01T10:00:00.250Z"}' > "$t"
+TZ=Europe/Paris statusline_transcript_observed_at "$t" out
+assert_eq "exact UTC under a daylight-saving zone (jq 1.6 regression)" "1782900000" "$out"
+printf '%s\n' '{"timestamp":"2026-07-01T10:00:00+00:00"}' > "$t"
+statusline_transcript_observed_at "$t" out
+assert_eq "+00:00 suffix accepted" "1782900000" "$out"
+printf '%s\n' '{"type":"summary"}' > "$t"
+statusline_transcript_observed_at "$t" out
+assert_eq "no timestamp -> empty" "" "$out"
+statusline_transcript_observed_at "$TH_TMP/nope.jsonl" out
+assert_eq "missing transcript -> empty" "" "$out"
+
 section "statusline_overlay_quota_cache"
 th_tmp_runtime
 source "$REPO_ROOT/src/statusline/cache.sh"
@@ -200,9 +291,7 @@ statusline_overlay_quota_cache "$qc"
 assert_eq "missing cache file: caller's own values untouched" "0" "$five_pct"
 assert_eq "missing cache file: quota_source stays empty" "" "$quota_source"
 
-# The file's writers live in agent-usage-tracker; this is its format.
-mkdir -p "${qc%/*}"
-printf '%s\n' "42${STATUSLINE_FIELD_SEPARATOR}1700000000${STATUSLINE_FIELD_SEPARATOR}55${STATUSLINE_FIELD_SEPARATOR}1700100000${STATUSLINE_FIELD_SEPARATOR}P${STATUSLINE_FIELD_SEPARATOR}500" > "$qc"
+statusline_write_quota_if_newer "$qc" 42 1700000000 55 1700100000 P 500
 five_pct=0; five_reset=""; week_pct=0; week_reset=""; quota_source=""
 statusline_overlay_quota_cache "$qc"
 assert_eq "overlays the cached 5h percent" "42" "$five_pct"

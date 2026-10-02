@@ -176,6 +176,13 @@ statusline_limit_segment() {
     local label="$1" pct="$2" resets="$3" now="$4" source="$5" output_name="$6"
     local color bar remain hours minutes result tag
     tag="${source:+ (${source})}"
+    # No reading at all (e.g. a Claude session before its first message,
+    # with no cached reading either): a dash, never a made-up 0%.
+    if [ -z "$pct" ]; then
+        statusline_bar 0 8 "" bar
+        printf -v "$output_name" '%s' "${STATUSLINE_GRAY_4}${label}${STATUSLINE_RESET} [${bar}] ${STATUSLINE_GRAY_4}–${STATUSLINE_RESET}"
+        return
+    fi
     statusline_severity_color "$pct" 70 color
     if [ "$pct" -ge 100 ] && [ -n "$resets" ]; then
         if [[ "$resets" =~ ^[0-9]+$ ]]; then

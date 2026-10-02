@@ -59,8 +59,9 @@ if [ -n "$payload_five_pct" ] || [ -n "$payload_week_pct" ]; then
     statusline_write_values_if_stale "$quota_cache" 60 codex-quota 4 "$now" \
         "$payload_five_pct" "$payload_five_reset" "$payload_week_pct" "$payload_week_reset"
 fi
-five_pct="${payload_five_pct:-0}"; five_reset="$payload_five_reset"
-week_pct="${payload_week_pct:-0}"; week_reset="$payload_week_reset"
+# Empty when unknown: the segment then shows a dash, not a made-up 0%.
+five_pct="$payload_five_pct"; five_reset="$payload_five_reset"
+week_pct="$payload_week_pct"; week_reset="$payload_week_reset"
 statusline_overlay_quota_cache "$quota_cache"
 
 statusline_common_segments

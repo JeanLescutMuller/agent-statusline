@@ -4,7 +4,7 @@ Shared Claude Code / Codex status line: thin provider adapters around the same s
 
 Personal, user-space tool - safe to run on any machine you don't own (no root/sudo assumed anywhere, aside from Codex's own install).
 
-Usage tracking (quota percent, tokens and spend over time, pollers, telemetry, research) is a separate project, [`agent-usage-tracker`](https://github.com/JeanLescutMuller/agent-usage-tracker), split out of this repo on 2026-09-30. The statusline works without it; with it, the Claude line shows the account's freshest quota reading instead of only its own session's. See "agent-usage-tracker" below for the whole contract.
+Usage tracking (quota percent, tokens and spend over time, pollers, telemetry, research) is a separate project, [`agent-usage-tracker`](https://github.com/JeanLescutMuller/agent-usage-tracker), split out of this repo on 2026-09-30. The statusline is complete without it; with it, the Claude line also gets the tracker's poller readings. See "agent-usage-tracker" below for the whole contract.
 
 ## Usage
 
@@ -48,6 +48,8 @@ flowchart TB
         direction LR
         hbC[("heartbeat/claude")]
         hbX[("heartbeat/codex")]
+        ccC0[("quota/claude
+        freshest stdin reading, tag X")]
         ccX[("quota/codex
         60s cache")]
         ccOther[("system/metrics, git/&lt;cwd&gt;/*, static/*
@@ -58,7 +60,7 @@ flowchart TB
         direction LR
         ingest["bin/ingest-claude-statusline.sh"]
         ccC[("state/quota/claude
-        latest reading only, tagged P/X")]
+        freshest reading incl. polls, tag P/X")]
         pollers["pollers (LaunchAgent)"]
     end
 
@@ -73,9 +75,11 @@ flowchart TB
     provcodex -->|touches every render| hbX
     provcodex -->|writes payload snapshot| ccX
 
+    provclaude -->|"writes if newer, tag X"| ccC0
+    provclaude -->|"reads back"| ccC0
     provclaude -->|"pipes its raw stdin payload"| ingest
     ingest -->|"writes if newer, tag X"| ccC
-    provclaude -->|"reads back for display"| ccC
+    provclaude -->|"reads back; the fresher of the two is shown"| ccC
     pollers -.->|"reads mtime"| hbC
     pollers -.->|"reads mtime"| hbX
     pollers -->|"writes if newer, tag P"| ccC
@@ -90,14 +94,22 @@ The whole contract between the two projects is three files, each written by exac
 | Interface | Written by | Read by | What |
 |---|---|---|---|
 | `~/opt/agent-usage-tracker/bin/ingest-claude-statusline.sh` | tracker (deployed) | Claude provider runs it | Every Claude render pipes its raw stdin payload into it, unchanged, before display. The statusline knows nothing about which fields the tracker keeps or where. Output and failures are ignored; skipped if the script isn't executable. |
-| `~/opt/agent-usage-tracker/state/quota/claude` | tracker (ingest `X`, poller `P`) | Claude provider | The account's freshest known 5h/7d reading, six `$'\034'`-separated fields: `five_pct five_reset week_pct week_reset source observed_at`. Overrides the render's own stdin values when present. |
+| `~/opt/agent-usage-tracker/state/quota/claude` | tracker (ingest `X`, poller `P`) | Claude provider | The tracker's freshest known 5h/7d reading, in the same six-field format as this repo's own `state/quota/claude` (below). Displayed only when its `observed_at` is newer than the own cache's. |
 | `~/opt/agent-statusline/state/heartbeat/{claude,codex}` | statusline, every render | tracker's pollers | Only the mtime matters: "a statusline is on screen right now", so the pollers poll faster. |
 
 `AGENT_USAGE_TRACKER_DIR` overrides the tracker's location (the tests point it at a stub).
 
-**Why the Claude line reads the tracker's file rather than its own stdin.** `rate_limits` on stdin is only *that session's* last-known reading, updated solely when that session gets a fresh API response, while the 5h/7d quota is account-wide. Three sessions that last talked to the API at three different moments each show their own frozen snapshot, disagreeing with each other and with the true current usage. The tracker's state file holds whichever reading is genuinely freshest (compared on `observed_at`, when the reading was true), from any session's push or its poller, so every open session converges on it within about one render cycle. The origin tag is displayed next to the percentage (`65% (P)`).
+**Why the Claude line doesn't just show its own stdin.** `rate_limits` on stdin is only *that session's* last-known reading, updated solely when that session gets a fresh API response, while the 5h/7d quota is account-wide. Three sessions that last talked to the API at three different moments would each show their own frozen snapshot, disagreeing with each other and with the true current usage. So every render writes its stdin reading into this repo's own `state/quota/claude`, stamped with `observed_at` (when the reading became true: the transcript's last timestamp, or now if there is none), only if it beats what is there; every open session then displays the freshest reading within about one render cycle. Freshness is per window: Claude sometimes sends a reading with only `seven_day`, and that never erases a known 5-hour value. The origin tag is displayed next to the percentage (`65% (X)`).
 
-**Without the tracker**, the Claude line displays its own stdin `rate_limits`, with no origin tag. Codex never depends on the tracker: its provider caches its own payload's rate limits in `state/quota/codex` (below).
+**What the tracker adds** is its poller's readings (tag `P`), which matter while no session has sent a message. At display time the provider compares the own cache with the tracker's file on `observed_at` and shows the fresher one, so the tracker can only ever make the display fresher: a stale or broken tracker loses the comparison, and a missing one is simply skipped. With no reading anywhere (a fresh session, nothing cached), the 5h/7d segments show `–`, never a made-up `0%`.
+
+| Installed | Claude quota display |
+|---|---|
+| Both | Freshest of every session's stdin and the tracker's polls |
+| Statusline only | Freshest of every session's stdin; `–` until any session has a reading |
+| Tracker only | No statusline at all, so the tracker gets no payloads and records no push rows |
+
+Codex never depends on the tracker: its provider caches its own payload's rate limits in `state/quota/codex` (below).
 
 ## Runtime layout
 
@@ -119,7 +131,9 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     │   ├── heartbeat/
     │   │   ├── claude                    epoch of the last Claude render (read by agent-usage-tracker)
     │   │   └── codex                     epoch of the last Codex render (read by agent-usage-tracker)
-    │   ├── quota/codex                   5h percent/reset, 7d percent/reset, from the Codex payload
+    │   ├── quota/
+    │   │   ├── claude                    freshest stdin reading of any session: 5h/7d percent+reset, tag X, observed_at
+    │   │   └── codex                     5h percent/reset, 7d percent/reset, from the Codex payload
     │   ├── spin/                         per-provider spinner counters
     │   └── git/cwd/.../
     │       ├── local                     local Git snapshot for that cwd
@@ -154,7 +168,7 @@ The shared log records cache refresh/write events for both providers, including 
 | Local Git | exact cwd | 8s | 1s |
 | Remote Git | exact cwd | 30s | 1s |
 
-Claude quotas aren't in this table: they come from the render's own stdin, overridden by agent-usage-tracker's state file when it is installed (see "agent-usage-tracker" above). Codex contributes its latest payload snapshot to the shared provider cache because no separate stable local quota endpoint has been established - `providers/codex-statusline-command.sh` makes no network call of its own.
+Claude quotas aren't in this table: they are written on every render whose stdin has a newer reading than the cache, and compared with agent-usage-tracker's state file at display time (see "agent-usage-tracker" above). Codex contributes its latest payload snapshot to the shared provider cache because no separate stable local quota endpoint has been established - `providers/codex-statusline-command.sh` makes no network call of its own.
 
 ## Codex status-line patch
 
@@ -173,7 +187,7 @@ Verbose clone/patch/compiler output is captured in `~/opt/agent-statusline/codex
 
 Statusline architecture (runs on every render):
 
-- `src/statusline/cache.sh`: paths, freshness, locking, timeouts, atomic writes, the heartbeat, and the quota state-file reader.
+- `src/statusline/cache.sh`: paths, freshness, locking, timeouts, atomic writes, the heartbeat, and the quota state files (write-if-newer, freshest-of overlay, transcript `observed_at`).
 - `src/statusline/format.sh`: shared colors, bars, limits, and Git formatting.
 - `src/statusline/refresh-*.sh`: one bounded refresh attempt, without cache policy.
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout; the only file that touches agent-usage-tracker.

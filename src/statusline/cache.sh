@@ -233,12 +233,10 @@ statusline_advance_spin_index() {
 # five_pct/five_reset/week_pct/week_reset/quota_source (same implicit-variable
 # convention as statusline_common_segments in format.sh) - only overlays
 # fields the cache has a non-empty value for, so a not-yet-populated cache
-# can't blank out a caller's already-live value. Two files use this format:
-# state/quota/codex (this repo's own, written by the Codex provider) and
-# agent-usage-tracker's state/quota/claude (read-only here - see
-# README.md's "agent-usage-tracker"). Field 5 is an origin tag (P = poll,
-# X = statusline push), field 6 the observed_at epoch the writers compare
-# on - read-only bookkeeping here, never displayed, hence the throwaway `_`.
+# can't blank out a caller's already-live value. Field 5 is an origin tag
+# (X = a statusline render's own stdin, P = agent-usage-tracker's poller),
+# field 6 the observed_at epoch the writers compare on - never displayed
+# here, hence the throwaway `_`.
 statusline_overlay_quota_cache() {
     local quota_cache="$1"
     local cached_five_pct cached_five_reset cached_week_pct cached_week_reset cached_source _
@@ -250,6 +248,100 @@ statusline_overlay_quota_cache() {
     [ -n "$cached_week_pct" ] && week_pct="$cached_week_pct"
     [ -n "$cached_week_reset" ] && week_reset="$cached_week_reset"
     [ -n "$cached_source" ] && quota_source="$cached_source"
+}
+
+# statusline_overlay_freshest_quota <file>... - overlays the given
+# six-field quota files oldest observed_at (field 6) first, so each field
+# ends up with its newest non-empty value; on a tie, the earliest argument
+# wins. Missing or unreadable files are skipped. Per field rather than
+# whole-file because a newer reading can lack a window (Claude sometimes
+# sends only seven_day), and that must not hide a known value for it.
+# Used for Claude: this repo's own state/quota/claude against
+# agent-usage-tracker's, so neither can freeze the display on a stale
+# reading - the fresher one is shown, whoever wrote it.
+statusline_overlay_freshest_quota() {
+    local file observed line
+    local -a l_sorted=()
+    for file in "$@"; do
+        [ -f "$file" ] || continue
+        observed=""
+        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r _ _ _ _ _ observed < "$file"
+        case "$observed" in ''|*[!0-9]*) continue ;; esac
+        # Zero-padded so a plain lexical sort orders by observed_at, then
+        # earlier arguments last on a tie (overlaid last = wins).
+        l_sorted+=("$(printf '%020d %05d %s' "$observed" $((99999 - ${#l_sorted[@]})) "$file")")
+    done
+    [ "${#l_sorted[@]}" -gt 0 ] || return 0
+    while IFS= read -r line; do
+        statusline_overlay_quota_cache "${line#* * }"
+    done < <(printf '%s\n' "${l_sorted[@]}" | sort)
+}
+
+# The write path for a "latest known quota" file in the six-field format
+# above. Compares on observed_at (epoch seconds the reading was actually
+# true, NOT write time) and overwrites only if strictly newer, so whichever
+# session has the genuinely freshest reading wins regardless of write order,
+# and every open session converges on it within about one render cycle.
+# No locking: a same-instant race could rarely clobber a fresher value with
+# a slightly-less-fresh one, atomic mv still prevents a torn file, and the
+# next render self-corrects. agent-usage-tracker writes its own file of the
+# same format with the same rule.
+statusline_write_quota_if_newer() {
+    local quota_cache="$1" five_pct="$2" five_reset="$3" week_pct="$4" \
+        week_reset="$5" source="$6" observed_at="$7"
+    local existing_observed_at="" old_five_pct="" old_five_reset="" old_week_pct="" old_week_reset="" tmp
+    mkdir -p "${quota_cache%/*}"
+    if [ -f "$quota_cache" ]; then
+        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r old_five_pct old_five_reset old_week_pct \
+            old_week_reset _ existing_observed_at < "$quota_cache"
+    fi
+    if [ -n "$existing_observed_at" ] && [ "$observed_at" -le "$existing_observed_at" ] 2>/dev/null; then
+        return 0
+    fi
+    # A newer reading that lacks a window keeps that window's known value
+    # rather than blanking it (Claude sometimes sends only seven_day).
+    if [ -z "$five_pct" ]; then five_pct="$old_five_pct" five_reset="$old_five_reset"; fi
+    if [ -z "$week_pct" ]; then week_pct="$old_week_pct" week_reset="$old_week_reset"; fi
+    tmp="${quota_cache}.tmp.$$-${RANDOM:-0}"
+    printf '%s\n' \
+        "${five_pct}${STATUSLINE_FIELD_SEPARATOR}${five_reset}${STATUSLINE_FIELD_SEPARATOR}${week_pct}${STATUSLINE_FIELD_SEPARATOR}${week_reset}${STATUSLINE_FIELD_SEPARATOR}${source}${STATUSLINE_FIELD_SEPARATOR}${observed_at}" \
+        > "$tmp"
+    mv "$tmp" "$quota_cache"
+}
+
+# statusline_transcript_observed_at <transcript_path> <output_name> - when
+# a Claude session's rate_limits reading actually became true: the last
+# timestamp in its transcript (rate_limits only change when a message
+# lands). Not "now": an idle session keeps re-sending the reading it got
+# hours ago, and stamping it with render time would let it beat a fresher
+# reading from another session. Sets the output to "" when the transcript
+# is missing or has no timestamp in its last 20 lines (some trailing
+# bookkeeping entries carry none).
+#
+# The UTC timestamp is converted by plain calendar arithmetic (Howard
+# Hinnant's days_from_civil), not jq's fromdateiso8601: jq 1.6 on macOS goes
+# through the local timezone and returns an epoch one hour too late whenever
+# that zone is in daylight-saving time. Only UTC timestamps ("Z" or
+# "+00:00", optional fractional seconds) are accepted.
+statusline_transcript_observed_at() {
+    local transcript_path="$1" output_name="$2" result=""
+    if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+        result="$(tail -n 20 "$transcript_path" 2>/dev/null | jq -n -r '
+            def epoch:
+                capture("^(?<y>[0-9]{4})-(?<mo>[0-9]{2})-(?<d>[0-9]{2})T(?<h>[0-9]{2}):(?<mi>[0-9]{2}):(?<s>[0-9]{2})(\\.[0-9]+)?(Z|\\+00:00)$")
+                | map_values(tonumber)
+                | (if .mo <= 2 then .y - 1 else .y end) as $y
+                | (($y / 400) | floor) as $era
+                | ($y - $era * 400) as $yoe
+                | (((153 * (if .mo > 2 then .mo - 3 else .mo + 9 end) + 2) / 5 | floor) + .d - 1) as $doy
+                | ($yoe * 365 + (($yoe / 4) | floor) - (($yoe / 100) | floor) + $doy) as $doe
+                | ($era * 146097 + $doe - 719468) * 86400 + .h * 3600 + .mi * 60 + .s;
+            [inputs | select(.timestamp != null) | .timestamp]
+            | if length == 0 then empty else last end
+            | epoch
+        ' 2>/dev/null)"
+    fi
+    printf -v "$output_name" '%s' "$result"
 }
 
 statusline_read_static() {

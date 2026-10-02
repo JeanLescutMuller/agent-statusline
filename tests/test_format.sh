@@ -46,6 +46,9 @@ statusline_bar 150 8 "$STATUSLINE_GREEN" out
 assert_eq "over 100% clamps to full width, not overflow" "████████" "$(strip_ansi "$out")"
 
 section "statusline_limit_segment"
+statusline_limit_segment 5h "" "" 0 "" out
+assert_contains "no reading: a dash" "$out" "–"
+assert_not_contains "no reading: never a percent" "$out" "%"
 statusline_limit_segment 5h 42 "" 0 "" out
 assert_contains "under 100%: shows a bar and the percent" "$out" "42%"
 assert_not_contains "under 100%: no Blocked text" "$out" "Blocked"
