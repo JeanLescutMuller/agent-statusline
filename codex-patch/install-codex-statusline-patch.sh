@@ -47,17 +47,8 @@ if [ -x "$destination/bin/codex" ] \
     exit 0
 fi
 
-# Source clone + Cargo build artifacts run several GB per Codex version and
-# are pure build scratch, never something this project owns persistently -
-# they belong under /tmp, not ~/opt. A single fixed-name scratch dir (never
-# mktemp'd per-run) keeps this to exactly one directory on disk no matter how
-# many times this script runs: it's wiped before every build (so a run that
-# unwinds via crash or kill -9, which skips the EXIT trap below, still can't
-# leave more than one behind - the next run's wipe catches it) and removed
-# again on a clean exit, success or failure. This replaced a design that
-# cached one such tree per Codex version forever under
-# $RUNTIME/source-<version>/ and never cleaned any of them up - see git
-# history if reviving cross-run build-cache reuse is ever worth revisiting.
+# Source clone + Cargo build artifacts run several GB: one fixed-name /tmp
+# scratch dir, wiped before every build and removed on exit.
 scratch_dir="/tmp/agent-statusline-codex-patch-build"
 rm -rf "$scratch_dir"
 mkdir -p "$scratch_dir"

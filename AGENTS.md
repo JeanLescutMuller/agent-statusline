@@ -15,7 +15,7 @@ Two independent mandates, kept in separate trees — see README.md's "Architectu
 ```
 agent-statusline/
 ├── install.sh                    # deploy onto a bare machine: shared lib, adapters (symlinked from ~/.claude, ~/.codex); drives codex-patch/ conditionally. No migration logic - see uninstall.sh
-├── uninstall.sh                  # removes everything install.sh deploys; preserves codex-patch/ (and a pre-split data/); flags anything else left over as an orphan
+├── uninstall.sh                  # removes everything install.sh deploys; preserves codex-patch/; flags anything else left over as an orphan
 ├── utils.sh                      # shared echo/color helpers for install.sh, uninstall.sh, and the patch script
 ├── providers/                    # statusline architecture: Claude/Codex payload adapters, call into src/statusline/
 ├── src/statusline/               # statusline architecture: shared cache/format lib + refresh scripts
@@ -25,17 +25,12 @@ agent-statusline/
 │   ├── merge_codex_config.py  # the merge logic, run by install.sh's "codex config" step
 │   ├── supported-versions.tsv # exact release-commit allowlist
 │   └── patches/              # one shared, cross-version status-line patch
-├── tests/                    # hermetic bash test suite, see tests/README.md
-└── TODO.md                  # deliberately postponed work
+└── tests/                    # hermetic bash test suite, see tests/README.md
 ```
 
 ## Install/uninstall
 
 `install.sh` assumes a bare machine and carries no one-time migration logic. Past renames/restructurings (`lib/` → `src/statusline/`, the `agent-quota-tracker` fold-in and the 2026-09-30 split back out into `agent-usage-tracker`) would each have needed a permanent guard block in `install.sh`, and that only ever grows. If a change needs a layout migration: run `uninstall.sh` (removes what `install.sh` deploys, preserves `codex-patch/`, flags anything else left over as an orphan to check by hand), resolve any reported orphans, then run `install.sh` fresh. Don't add a migration guard back into `install.sh` instead - that's the pattern this pair replaced.
-
-## Deferred work
-
-See `TODO.md` for deliberately postponed project improvements.
 
 ## Codex patch conventions
 

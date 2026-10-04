@@ -32,33 +32,13 @@ except tomllib.TOMLDecodeError as exc:
 
 owned = ("status_line", "status_line_use_colors")
 current_tui = current.get("tui", {})
-if all(current_tui.get(key) == desired[key] for key in owned) and "status_line_command" not in current_tui:
+if all(current_tui.get(key) == desired[key] for key in owned):
     print("  \033[32m✓\033[0m status line")
     sys.exit(0)
 
 lines = text.splitlines()
 table_re = re.compile(r"^\s*\[([^][]+)]\s*(?:#.*)?$")
 assignment_re = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
-
-# Older installers wrote a table that Codex never read. Remove it as a
-# self-migrating cleanup; the patched binary uses CODEX_STATUS_LINE_COMMAND or
-# ~/.codex/statusline-command.sh directly.
-nested_start = None
-nested_end = None
-for index, line in enumerate(lines):
-    match = table_re.match(line)
-    if not match:
-        continue
-    if match.group(1).strip() == "tui.status_line_command":
-        nested_start = index
-        continue
-    if nested_start is not None:
-        nested_end = index
-        break
-if nested_start is not None:
-    if nested_end is None:
-        nested_end = len(lines)
-    del lines[nested_start:nested_end]
 
 # Locate the plain [tui] table. Dotted/nested TUI tables are separate sections.
 tui_start = None

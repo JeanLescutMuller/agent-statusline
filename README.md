@@ -181,7 +181,7 @@ Codex's TUI does not natively support a `status_line_command` the way this proje
 
 Verbose clone/patch/compiler output is captured in `~/opt/agent-statusline/codex-patch/build.log`, never streamed to the terminal - only milestones and the final result print.
 
-`install.sh` then runs `codex-patch/merge_codex_config.py`, which owns just the `[tui]` keys `status_line` and `status_line_use_colors` in `~/.codex/config.toml`, merging in `codex-patch/codex_tui.toml` via `tomllib` and touching nothing else in that file. It also removes the obsolete `[tui.status_line_command]` table written by older installers; the patched binary reads `CODEX_STATUS_LINE_COMMAND` or falls back to `~/.codex/statusline-command.sh`.
+`install.sh` then runs `codex-patch/merge_codex_config.py`, which owns just the `[tui]` keys `status_line` and `status_line_use_colors` in `~/.codex/config.toml`, merging in `codex-patch/codex_tui.toml` via `tomllib` and touching nothing else in that file. The patched binary reads `CODEX_STATUS_LINE_COMMAND` or falls back to `~/.codex/statusline-command.sh`.
 
 ## Source files
 
@@ -193,7 +193,7 @@ Statusline architecture (runs on every render):
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout; the only file that touches agent-usage-tracker.
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
 - `install.sh` + `utils.sh`: deployment and Codex config wiring - assumes a bare machine, no migration logic.
-- `uninstall.sh`: removes everything `install.sh` deploys; preserves `codex-patch/` (and a pre-split `data/`, if one is left); flags anything else left over as an orphan.
+- `uninstall.sh`: removes everything `install.sh` deploys; preserves `codex-patch/`; flags anything else left over as an orphan.
 
 Codex patch (build-time, one-off; see "Codex status-line patch" above):
 

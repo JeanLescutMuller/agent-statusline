@@ -139,9 +139,8 @@ statusline_reset_part() {
     printf -v "$output_name" '%s' "${color}${text}${STATUSLINE_RESET}"
 }
 
-# statusline_resets_segment - replaces the old datetime/5h/7d rotating
-# carousel with a single always-visible "Resets: 4h, 4d15h" summary, each
-# value colored by how close its own limit is to resetting.
+# statusline_resets_segment - an always-visible "Resets: 4h, 4d15h" summary,
+# each value colored by how close its own limit is to resetting.
 statusline_resets_segment() {
     local now="$1" five_reset="$2" week_reset="$3" output_name="$4"
     local five_part week_part
@@ -242,24 +241,22 @@ statusline_common_segments() {
         IFS="$STATUSLINE_FIELD_SEPARATOR" read -r mem_used mem_total mem_pct < "$metrics_cache"
     fi
 
-    git_segment=""
-    if statusline_git_cache_paths "$cwd"; then
-        statusline_refresh_if_stale "$STATUSLINE_GIT_LOCAL_CACHE" 8 \
-            "git-$STATUSLINE_GIT_KEY-local" 3 1 "$now" \
-            bash "$lib_dir/refresh-git-local.sh" "$STATUSLINE_GIT_ROOT"
-        statusline_refresh_if_stale "$STATUSLINE_GIT_REMOTE_CACHE" 30 \
-            "git-$STATUSLINE_GIT_KEY-remote" 3 1 "$now" \
-            bash "$lib_dir/refresh-git-remote.sh" "$STATUSLINE_GIT_ROOT"
+    statusline_git_cache_paths "$cwd"
+    statusline_refresh_if_stale "$STATUSLINE_GIT_LOCAL_CACHE" 8 \
+        "git-$STATUSLINE_GIT_KEY-local" 3 1 "$now" \
+        bash "$lib_dir/refresh-git-local.sh" "$STATUSLINE_GIT_ROOT"
+    statusline_refresh_if_stale "$STATUSLINE_GIT_REMOTE_CACHE" 30 \
+        "git-$STATUSLINE_GIT_KEY-remote" 3 1 "$now" \
+        bash "$lib_dir/refresh-git-remote.sh" "$STATUSLINE_GIT_ROOT"
 
-        local branch="" untracked=0 unstaged=0 staged=0 conflicts=0 ahead=0 behind=0
-        [ -f "$STATUSLINE_GIT_LOCAL_CACHE" ] && \
-            IFS="$STATUSLINE_FIELD_SEPARATOR" read -r branch untracked unstaged staged conflicts \
-                < "$STATUSLINE_GIT_LOCAL_CACHE"
-        [ -f "$STATUSLINE_GIT_REMOTE_CACHE" ] && \
-            IFS="$STATUSLINE_FIELD_SEPARATOR" read -r ahead behind < "$STATUSLINE_GIT_REMOTE_CACHE"
-        statusline_git_segment "$branch" "$untracked" "$unstaged" "$staged" \
-            "$conflicts" "$ahead" "$behind" git_segment
-    fi
+    local branch="" untracked=0 unstaged=0 staged=0 conflicts=0 ahead=0 behind=0
+    [ -f "$STATUSLINE_GIT_LOCAL_CACHE" ] && \
+        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r branch untracked unstaged staged conflicts \
+            < "$STATUSLINE_GIT_LOCAL_CACHE"
+    [ -f "$STATUSLINE_GIT_REMOTE_CACHE" ] && \
+        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r ahead behind < "$STATUSLINE_GIT_REMOTE_CACHE"
+    statusline_git_segment "$branch" "$untracked" "$unstaged" "$staged" \
+        "$conflicts" "$ahead" "$behind" git_segment
 
     statusline_read_static
     printf -v host_color '\033[38;5;%sm' "$STATUSLINE_HOST_COLOR"

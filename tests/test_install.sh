@@ -39,7 +39,6 @@ assert_eq "Codex adapter is a symlink too" \
     "$th_home/opt/agent-statusline/providers/codex-statusline-command.sh" "$(readlink "$th_home/.codex/statusline-command.sh")"
 diff -q "$REPO_ROOT/providers/claude-statusline-command.sh" "$th_home/.claude/statusline-command.sh" >/dev/null
 assert_status "the symlink resolves to the current provider" 0 $?
-assert_file_missing "no data/ - usage history belongs to agent-usage-tracker" "$th_home/opt/agent-statusline/data"
 assert_file_missing "nothing of agent-usage-tracker's is deployed" "$th_home/opt/agent-usage-tracker"
 assert_file_missing "no LaunchAgent at all" "$th_home/Library/LaunchAgents"
 assert_file_missing "~/.claude/settings.json is not touched" "$th_home/.claude/settings.json"
@@ -71,7 +70,6 @@ config="$merge_dir/none/config.toml"
 CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" python3 "$merge_script" >/dev/null
 assert_file_exists "creates config.toml with a [tui] table" "$config"
 assert_contains "selects the custom status-line item" "$(cat "$config")" 'status_line = ["custom"]'
-assert_not_contains "does not write the obsolete command table" "$(cat "$config")" "status_line_command"
 
 section "  existing [tui] table with unrelated keys is preserved"
 config="$merge_dir/unrelated/config.toml"
@@ -87,25 +85,6 @@ CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" pyt
 assert_contains "keeps the unrelated [tui] key" "$(cat "$config")" "some_unrelated_key = true"
 assert_contains "keeps the unrelated table entirely" "$(cat "$config")" "[other_table]"
 assert_contains "adds the status line keys" "$(cat "$config")" 'status_line = ["custom"]'
-python3 -c "import tomllib,sys; tomllib.load(open('$config','rb'))"
-assert_status "result is still valid TOML" 0 $?
-
-section "  stale status_line_command table is removed"
-config="$merge_dir/stale/config.toml"
-mkdir -p "$(dirname "$config")"
-cat > "$config" <<'EOF'
-[tui]
-status_line = ["custom"]
-status_line_use_colors = true
-
-[tui.status_line_command]
-command = ["bash", "/old/stale/path.sh"]
-refresh_interval = 99
-EOF
-CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" python3 "$merge_script" >/dev/null
-occurrences="$(grep -c 'status_line_command' "$config")"
-assert_eq "no dead [tui.status_line_command] table remains after the merge" "0" "$occurrences"
-assert_not_contains "the stale command path is gone" "$(cat "$config")" "/old/stale/path.sh"
 python3 -c "import tomllib,sys; tomllib.load(open('$config','rb'))"
 assert_status "result is still valid TOML" 0 $?
 

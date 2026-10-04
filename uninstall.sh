@@ -1,33 +1,13 @@
 #!/bin/bash
-# Removes everything install.sh deploys: the deployed provider adapters
-# (~/.claude/statusline-command.sh, ~/.codex/statusline-command.sh), and the
-# code/cache/log/lock state under ~/opt/agent-statusline. Run this before
-# re-installing across an incompatible on-disk layout change - see
-# install.sh's own header comment for why migration lives here instead of
-# as one-off logic baked into that script. Never touches agent-usage-tracker.
+# Removes everything install.sh deploys: the provider symlinks in ~/.claude
+# and ~/.codex, and the code/cache/log/lock state under ~/opt/agent-statusline.
+# Run it before re-installing across a layout change (install.sh carries no
+# migration logic). Never touches agent-usage-tracker or ~/.codex/config.toml
+# (a missing script just leaves Codex's status-line item empty).
 #
-# Deliberately preserves two things instead of a blind rm -rf:
-# - data/, if present - usage history from before the 2026-09-30 split into
-#   agent-usage-tracker, which lives under ~/opt/agent-usage-tracker/data
-#   now. Irreplaceable; move it there or remove it yourself.
-# - codex-patch/ (the cloned source + build.log used to build the patched
-#   Codex binary) - the actual patched binary lives outside this tree, under
-#   ~/.codex/packages/standalone/; rebuilding this is a real network clone +
-#   multi-minute Cargo build, not something an unrelated statusline
-#   uninstall should trigger by accident.
-#
-# Does NOT touch ~/.codex/config.toml's [tui] status-line keys: with the
-# provider adapter gone, Codex's patched binary just fails to run a missing
-# script and shows nothing for that status-line item - the same graceful
-# degradation as if the feature were disabled, not a broken config. Remove
-# those keys by hand if you want config.toml fully clean.
-#
-# Anything left under ~/opt/agent-statusline after that is a genuine orphan
-# - not something this script recognizes - and gets listed for you to check
-# by hand rather than being silently deleted or silently ignored. A known
-# target (src/state/locks/logs) that still won't fully clear after retries
-# is reported separately instead - almost always another session actively
-# rendering and repopulating it, not an unrecognized orphan.
+# Preserves codex-patch/ (build.log and marker; the patched binary lives
+# under ~/.codex/packages/standalone/). Anything else left over is listed as
+# an orphan to check by hand, never deleted.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -53,16 +33,8 @@ done
 
 step "runtime tree ($RUNTIME)"
 if [ -d "$RUNTIME" ]; then
-    # A concurrently-running Claude/Codex session's own live statusline
-    # render can recreate files under state/ (git cache, heartbeat,
-    # static/*) while this runs - rm -rf racing a writer fails with
-    # "Directory not empty" on the parent dir, not silently, and the
-    # partially-removed dir would otherwise look exactly like an
-    # unrecognized orphan below even though this script fully intends to
-    # remove it. A render finishes in well under a second, so a few short
-    # retries clear a transient collision in practice; this is not a lock
-    # against every future render, just enough slack for whatever render
-    # was in flight when this script started.
+    # A live render in another session can recreate state/ while rm -rf
+    # runs; a few short retries clear that in practice.
     known_targets="src providers state locks logs"
     for target in $known_targets; do
         for attempt in 1 2 3; do
@@ -74,7 +46,6 @@ if [ -d "$RUNTIME" ]; then
     installed "removed deployed code and cache/log/lock state"
     # rmdir only succeeds on an empty directory - a Codex patch that was
     # never built leaves nothing behind; real content is kept and reported.
-    [ -d "$RUNTIME/data" ] && skip "preserved $RUNTIME/data (usage history from before the tracker split - check by hand)"
     rmdir "$RUNTIME/codex-patch" 2>/dev/null
     [ -d "$RUNTIME/codex-patch" ] && skip "preserved $RUNTIME/codex-patch (expensive to rebuild)"
 
@@ -85,7 +56,7 @@ if [ -d "$RUNTIME" ]; then
     [ -n "$still_racing" ] && fail "couldn't fully remove:$still_racing - most likely another Claude/Codex session is still actively rendering and repopulating it faster than this can clear it; wait for other sessions to finish, then re-run"
 
     orphans="$(find "$RUNTIME" -mindepth 1 -maxdepth 1 \
-        ! -name data ! -name codex-patch ! -name src ! -name state \
+        ! -name codex-patch ! -name src ! -name state \
         ! -name locks ! -name logs 2>/dev/null)"
     if [ -n "$orphans" ]; then
         fail "orphan files/dirs under $RUNTIME - not recognized by this script, check by hand:"

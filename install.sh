@@ -1,26 +1,14 @@
 #!/bin/bash
-# Idempotent installer for agent-statusline, for a machine with no prior
-# agent-statusline (or predecessor-project) install. Carries no one-time
-# migration logic on purpose: if you're moving between incompatible on-disk
-# layouts (this repo's own history has had several), run uninstall.sh first
-# - it removes everything this script deploys, preserves codex-patch/ (costly
-# to rebuild), and flags anything left over as an orphan to check by
-# hand - then re-run this script against a clean machine. A bare
-# install/uninstall pair is easier to keep correct forever than an
-# ever-growing pile of one-off legacy-layout guards in this file.
+# Idempotent installer for agent-statusline on a bare machine. No migration
+# logic on purpose: across a layout change, run uninstall.sh first.
 #
 # Deploys the shared cache/format library and the Claude/Codex provider
-# adapters, and - when Codex is installed - builds/deploys the
-# status-line-command patch and wires ~/.codex/config.toml's [tui]
-# status-line keys.
+# adapters, and - when Codex is installed - builds the status-line-command
+# patch and sets ~/.codex/config.toml's [tui] status-line keys.
 #
-# Usage tracking is a separate project, agent-usage-tracker, installed on its
-# own. Nothing here deploys or depends on it; the Claude provider uses it
-# when it is there (README.md's "agent-usage-tracker").
-#
-# Depends on bootstrap-home's ~/opt/bootstrap-home/bin/get_host_color being on
-# disk (used by the cache library for a deterministic per-host color); its
-# absence just falls back to a default color, it is not a hard dependency.
+# Optional, not deployed here: agent-usage-tracker (README.md's
+# "agent-usage-tracker") and bootstrap-home's get_host_color (falls back to a
+# default color).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -54,9 +42,8 @@ for f in "$SCRIPT_DIR"/src/statusline/*.sh; do
     _deploy "$f" "$LIB_DIR/$(basename "$f")"
 done
 
-# Symlink into the runtime copy. Used for the OS/app-mandated locations
-# (~/.claude, ~/.codex), which hold only a symlink back into ~/opt - a real
-# file there went stale unnoticed once (2026-09-30), and a symlink cannot.
+# ~/.claude and ~/.codex hold only a symlink back into ~/opt, never a copy
+# that can go stale.
 _link() {
     local real="$1" link="$2"
     mkdir -p "$(dirname "$link")"
@@ -73,10 +60,6 @@ _deploy "$SCRIPT_DIR/providers/claude-statusline-command.sh" "$RUNTIME/providers
 _deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$RUNTIME/providers/codex-statusline-command.sh"
 _link "$RUNTIME/providers/claude-statusline-command.sh" "$HOME/.claude/statusline-command.sh"
 _link "$RUNTIME/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
-
-step "runtime state"
-mkdir -p "$RUNTIME/state/static" "$RUNTIME/locks" "$RUNTIME/logs"
-ok "runtime state"
 
 step "codex status-line patch"
 if command -v codex >/dev/null 2>&1; then

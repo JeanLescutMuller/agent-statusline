@@ -17,19 +17,15 @@ statusline_cache_init() {
 
 # Log cache activity, not every render. Per-render logging would produce about
 # 650k lines/day at 30 sessions and a four-second Codex refresh interval.
-# log_file/max_bytes default to the shared statusline.log - pass them
-# explicitly for a dedicated, independently-rotated debug log instead (see
-# codex-statusline-command.sh's carousel-frame log).
 statusline_log_event() {
-    local now="$1" event="$2" details="${3:-}" \
-        log_file="${4:-$STATUSLINE_LOG_FILE}" max_bytes="${5:-$STATUSLINE_LOG_MAX_BYTES}" size=0
-    mkdir -p "$(dirname "$log_file")"
+    local now="$1" event="$2" details="${3:-}" log_file="$STATUSLINE_LOG_FILE" size=0
+    mkdir -p "$STATUSLINE_LOG_DIR"
     if [ -f "$log_file" ]; then
         size="$(stat -f %z "$log_file" 2>/dev/null \
             || stat -c %s "$log_file" 2>/dev/null \
             || printf '0')"
     fi
-    if [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -ge "$max_bytes" ]; then
+    if [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -ge "$STATUSLINE_LOG_MAX_BYTES" ]; then
         mv "$log_file" "${log_file}.1" 2>/dev/null || true
     fi
     printf '%s event=%s%s%s\n' "$now" "$event" "${details:+ }" "$details" \
@@ -204,16 +200,9 @@ statusline_touch_heartbeat() {
     printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/heartbeat/$provider" 2>/dev/null || true
 }
 
-# statusline_advance_spin_index - a small persisted counter, incremented by
-# one and wrapped mod 10 on every render, used to pick a spinner frame that
-# visibly changes every render regardless of the host's configured
-# statusLine refreshInterval. A plain now-based modulo doesn't work here:
-# when refreshInterval evenly divides the modulus (Claude Code's own
-# settings.json commonly sets refreshInterval: 10, exactly matching a
-# mod-10 spinner), `now % 10` lands on the same remainder every single
-# render and the spinner visibly freezes. No locking needed - like the
-# heartbeat file, a lost or duplicate increment under a race is invisible
-# cosmetically, not worth a lock for that low a stake.
+# statusline_advance_spin_index - a persisted counter, +1 mod 10 per render,
+# so the spinner moves every render: `now % 10` freezes when refreshInterval
+# is 10. No lock: a lost increment is invisible.
 statusline_advance_spin_index() {
     local provider="$1" output_name="$2"
     local spin_dir="$STATUSLINE_STATE_DIR/spin" spin_file current next
@@ -300,11 +289,8 @@ statusline_write_quota_if_newer() {
 # a Claude session's rate_limits reading actually became true: the
 # timestamp of the last *assistant* message in its transcript, since only
 # an API response updates rate_limits. Not "now", and not just any entry:
-# an idle session keeps re-sending the reading it got days ago while its
-# transcript still gains bookkeeping entries (attachments, titles, modes),
-# and stamping that stale reading as fresh lets it beat every genuinely
-# newer one (seen live 2026-10-01: a session idle since 09-30 froze every
-# statusline on its 11%). Sets the output to "" when no assistant message
+# an idle session keeps re-sending a days-old reading while its transcript
+# still gains bookkeeping entries. Sets the output to "" when no assistant message
 # is found in the last 256 KB, or the transcript is missing - callers must
 # then treat the reading as of unknown age, never as fresh.
 #
@@ -356,11 +342,7 @@ statusline_read_static() {
 }
 
 statusline_git_cache_paths() {
-    # Two separate `local` statements, deliberately: a single
-    # `local cwd="$1" cache_dir="...${cwd}"` expands every word before any
-    # assignment takes effect, so ${cwd} would read the *caller's* cwd (or be
-    # unbound under `set -u`), not $1 - it only "worked" before because every
-    # caller happened to already have an outer variable named cwd.
+    # Two `local`s: one would expand ${cwd} before assigning it.
     local cwd="$1"
     local cache_dir="$STATUSLINE_STATE_DIR/git/cwd${cwd}"
 

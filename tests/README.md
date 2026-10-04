@@ -42,7 +42,7 @@ pages 1/2/3 as they come up.
 | `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the `–` with no reading, cross-session convergence without the tracker, and the contract against a stub tracker (payload forwarded, fresher tracker reading wins, stale one never freezes the display) |
 | `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |
 | `test_install.sh` | `install.sh` - idempotency, Codex-absent skip, the real TOML-merge heredoc |
-| `test_uninstall.sh` | `uninstall.sh` - full removal, a leftover `data/` and `codex-patch/` preserved, orphan reporting |
+| `test_uninstall.sh` | `uninstall.sh` - full removal, `codex-patch/` preserved, orphan reporting |
 | `test_codex_patch_guards.sh` | `codex-patch/install-codex-statusline-patch.sh` guard clauses only |
 | `test_utils.sh` | `utils.sh` |
 | `test_repo_hygiene.sh` | `bash -n` on every script, shellcheck if installed, and the `codex-patch/` vs `src/statusline/`+`providers/` boundary, and that only the Claude provider touches agent-usage-tracker |

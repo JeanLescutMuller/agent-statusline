@@ -1,7 +1,7 @@
 #!/bin/bash
 # End-to-end tests for uninstall.sh, run against a temp $HOME so nothing ever
 # touches the real machine. Covers: full removal of what install.sh deploys,
-# data/ and codex-patch/ preserved rather than blindly deleted, and an
+# codex-patch/ preserved rather than blindly deleted, and an
 # unrecognized leftover file/dir is reported as an orphan instead of being
 # silently removed or silently ignored.
 set -uo pipefail
@@ -34,24 +34,22 @@ assert_file_missing "Claude provider adapter removed" "$th_home/.claude/statusli
 assert_file_missing "Codex provider adapter removed" "$th_home/.codex/statusline-command.sh"
 assert_file_missing "deployed shared lib removed" "$th_home/opt/agent-statusline/src"
 assert_file_missing "runtime state removed" "$th_home/opt/agent-statusline/state"
-assert_file_missing "the whole runtime dir is gone when nothing was left to preserve (data/ was never populated)" \
+assert_file_missing "the whole runtime dir is gone when nothing was left to preserve" \
     "$th_home/opt/agent-statusline"
 assert_not_contains "no orphans reported on a clean install" "$TH_OUT" "orphan files/dirs under"
 rm -rf "$th_home"
 
-section "pre-split usage data and the Codex patch build are preserved, not deleted"
+section "the Codex patch build is preserved, not deleted"
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-uninstallhome.XXXXXX")"
 run_install "$th_home"
-mkdir -p "$th_home/opt/agent-statusline/data/claude" "$th_home/opt/agent-statusline/codex-patch/source-0.150.1"
-printf '{"ts":1,"source":"claude_statusline"}\n' > "$th_home/opt/agent-statusline/data/claude/account.jsonl"
+mkdir -p "$th_home/opt/agent-statusline/codex-patch"
 printf 'build output\n' > "$th_home/opt/agent-statusline/codex-patch/build.log"
 run_uninstall "$th_home"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_contains "reports preserving data/" "$TH_OUT" "preserved"
-assert_file_exists "data/ survives" "$th_home/opt/agent-statusline/data/claude/account.jsonl"
+assert_contains "reports preserving codex-patch/" "$TH_OUT" "preserved"
 assert_file_exists "codex-patch/ build artifacts survive" "$th_home/opt/agent-statusline/codex-patch/build.log"
 assert_file_missing "deployed code is still gone" "$th_home/opt/agent-statusline/src"
-assert_not_contains "data/ and codex-patch/ are not reported as orphans" "$TH_OUT" "mystery"
+assert_not_contains "codex-patch/ is not reported as an orphan" "$TH_OUT" "mystery"
 rm -rf "$th_home"
 
 section "an unrecognized leftover is flagged as an orphan, not silently removed"
