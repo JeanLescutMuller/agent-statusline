@@ -26,37 +26,6 @@ statusline_display_path() {
     printf -v "$output_name" '%s' "$display"
 }
 
-statusline_fmt_epoch() {
-    local epoch="$1" format="$2"
-    if [ "$(uname -s)" = "Darwin" ]; then
-        LC_TIME=C date -r "$epoch" "+$format" 2>/dev/null
-    else
-        LC_TIME=C date -d "@$epoch" "+$format" 2>/dev/null
-    fi
-}
-
-statusline_ordinal_suffix() {
-    case "$1" in
-        1|21|31) printf 'st' ;;
-        2|22) printf 'nd' ;;
-        3|23) printf 'rd' ;;
-        *) printf 'th' ;;
-    esac
-}
-
-statusline_rotating_time() {
-    local index="$1" datetime="$2" week_reset="$3" five_reset="$4" output_name="$5"
-    local week_day result="$datetime"
-    if [ "$index" -eq 1 ] && [[ "$week_reset" =~ ^[0-9]+$ ]]; then
-        week_day="$(statusline_fmt_epoch "$week_reset" '%e')"
-        week_day="${week_day// /}"
-        result="7d reset on $(statusline_fmt_epoch "$week_reset" '%A') ${week_day}$(statusline_ordinal_suffix "$week_day") at $(statusline_fmt_epoch "$week_reset" '%Hh')"
-    elif [ "$index" -eq 2 ] && [[ "$five_reset" =~ ^[0-9]+$ ]]; then
-        result="5h reset at $(statusline_fmt_epoch "$five_reset" '%Hh%M')"
-    fi
-    printf -v "$output_name" '%s' "$result"
-}
-
 statusline_spinner_frame() {
     local now="$1" output_name="$2"
     local index=$(( (10#$now) % 10 ))
@@ -171,38 +140,19 @@ statusline_bar() {
     printf -v "$output_name" '%s' "$result"
 }
 
-statusline_limit_segment() {
-    local label="$1" pct="$2" resets="$3" now="$4" output_name="$5"
-    local color bar remain hours minutes result
-    # No reading at all (e.g. a Claude session before its first message,
-    # with no cached reading either): a dash, never a made-up 0%.
+# statusline_meter_segment <label> <pct> <yellow_threshold> <output_name> -
+# "label [bar] pct%", colored by severity; a dash when pct is empty (no
+# reading anywhere), never a made-up 0%.
+statusline_meter_segment() {
+    local label="$1" pct="$2" yellow_threshold="$3" output_name="$4" color bar
     if [ -z "$pct" ]; then
         statusline_bar 0 8 "" bar
         printf -v "$output_name" '%s' "${STATUSLINE_GRAY_4}${label}${STATUSLINE_RESET} [${bar}] ${STATUSLINE_GRAY_4}–${STATUSLINE_RESET}"
         return
     fi
-    statusline_severity_color "$pct" 70 color
-    if [ "$pct" -ge 100 ] && [ -n "$resets" ]; then
-        if [[ "$resets" =~ ^[0-9]+$ ]]; then
-            remain=$((resets - now)); [ "$remain" -lt 0 ] && remain=0
-            hours=$((remain / 3600)); minutes=$(((remain % 3600) / 60))
-            result="${STATUSLINE_RED}${label} Blocked - resets in ${hours}h ${minutes}m${STATUSLINE_RESET}"
-        else
-            result="${STATUSLINE_RED}${label} Blocked - resets ${resets}${STATUSLINE_RESET}"
-        fi
-    else
-        statusline_bar "$pct" 8 "$color" bar
-        result="${color}${label}${STATUSLINE_RESET} [${bar}] ${color}${pct}%${STATUSLINE_RESET}"
-    fi
-    printf -v "$output_name" '%s' "$result"
-}
-
-statusline_context_segment() {
-    local pct="$1" output_name="$2" color bar result
-    statusline_severity_color "$pct" 40 color
+    statusline_severity_color "$pct" "$yellow_threshold" color
     statusline_bar "$pct" 8 "$color" bar
-    result="${color}💬 ${STATUSLINE_RESET}[${bar}] ${color}${pct}%${STATUSLINE_RESET}"
-    printf -v "$output_name" '%s' "$result"
+    printf -v "$output_name" '%s' "${color}${label}${STATUSLINE_RESET} [${bar}] ${color}${pct}%${STATUSLINE_RESET}"
 }
 
 statusline_git_segment() {
@@ -226,8 +176,8 @@ statusline_git_segment() {
 # statusline_common_segments - the metrics/git/host-color/path/limit segment
 # assembly shared byte-for-byte by both providers. Not a general-purpose
 # primitive like the functions above (no output_name params, unlike the rest
-# of this file) - it reads $cwd/$now/$context_pct/$five_pct/$five_reset/
-# $week_pct/$week_reset/$lib_dir and sets $git_segment/$host_color/
+# of this file) - it reads $cwd/$now/$context_pct/$five_pct/
+# $week_pct/$lib_dir and sets $git_segment/$host_color/
 # $display_cwd/$context_segment/$five_segment/$week_segment/$memory_segment
 # by relying on the caller already using those exact names (both providers
 # do, by convention), since explicit passing of 7 inputs + 7 outputs would be
@@ -241,30 +191,22 @@ statusline_common_segments() {
         IFS="$STATUSLINE_FIELD_SEPARATOR" read -r mem_used mem_total mem_pct < "$metrics_cache"
     fi
 
-    statusline_git_cache_paths "$cwd"
-    statusline_refresh_if_stale "$STATUSLINE_GIT_LOCAL_CACHE" 8 \
-        "git-$STATUSLINE_GIT_KEY-local" 3 1 "$now" \
-        bash "$lib_dir/refresh-git-local.sh" "$STATUSLINE_GIT_ROOT"
-    statusline_refresh_if_stale "$STATUSLINE_GIT_REMOTE_CACHE" 30 \
-        "git-$STATUSLINE_GIT_KEY-remote" 3 1 "$now" \
-        bash "$lib_dir/refresh-git-remote.sh" "$STATUSLINE_GIT_ROOT"
-
+    local git_cache="$STATUSLINE_STATE_DIR/git/cwd${cwd}/status"
+    statusline_refresh_if_stale "$git_cache" 8 "git-cwd${cwd//\//-}" 3 1 "$now" \
+        bash "$lib_dir/refresh-git.sh" "$cwd"
     local branch="" untracked=0 unstaged=0 staged=0 conflicts=0 ahead=0 behind=0
-    [ -f "$STATUSLINE_GIT_LOCAL_CACHE" ] && \
-        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r branch untracked unstaged staged conflicts \
-            < "$STATUSLINE_GIT_LOCAL_CACHE"
-    [ -f "$STATUSLINE_GIT_REMOTE_CACHE" ] && \
-        IFS="$STATUSLINE_FIELD_SEPARATOR" read -r ahead behind < "$STATUSLINE_GIT_REMOTE_CACHE"
+    [ -f "$git_cache" ] && IFS="$STATUSLINE_FIELD_SEPARATOR" \
+        read -r branch untracked unstaged staged conflicts ahead behind < "$git_cache"
     statusline_git_segment "$branch" "$untracked" "$unstaged" "$staged" \
         "$conflicts" "$ahead" "$behind" git_segment
 
-    statusline_read_static
+    statusline_read_host
     printf -v host_color '\033[38;5;%sm' "$STATUSLINE_HOST_COLOR"
     statusline_display_path "$cwd" display_cwd
 
-    statusline_context_segment "$context_pct" context_segment
-    statusline_limit_segment 5h "$five_pct" "$five_reset" "$now" five_segment
-    statusline_limit_segment 7d "$week_pct" "$week_reset" "$now" week_segment
+    statusline_meter_segment 💬 "$context_pct" 40 context_segment
+    statusline_meter_segment 5h "$five_pct" 70 five_segment
+    statusline_meter_segment 7d "$week_pct" 70 week_segment
 
     memory_segment=""
     if [ -n "$mem_used" ] && [ -n "$mem_total" ]; then

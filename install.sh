@@ -4,7 +4,7 @@
 #
 # Deploys the shared cache/format library and the Claude/Codex provider
 # adapters, and - when Codex is installed - builds the status-line-command
-# patch and sets ~/.codex/config.toml's [tui] status-line keys.
+# patch and checks ~/.codex/config.toml's [tui] status-line keys.
 #
 # Optional, not deployed here: agent-usage-tracker (README.md's
 # "agent-usage-tracker") and bootstrap-home's get_host_color (falls back to a
@@ -13,9 +13,6 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/utils.sh"
-
-command -v python3 >/dev/null 2>&1 || { echo "python3 not found on PATH"; exit 1; }
-PYTHON3="$(command -v python3)"  # codex config merge
 
 RUNTIME="$HOME/opt/agent-statusline"
 LIB_DIR="$RUNTIME/src/statusline"
@@ -73,13 +70,23 @@ else
 fi
 
 step "codex config"
+# Checked, not edited: ~/.codex/config.toml is yours. The patched binary runs
+# ~/.codex/statusline-command.sh once [tui] selects the "custom" item.
 CONFIG="$HOME/.codex/config.toml"
-DESIRED="$SCRIPT_DIR/codex-patch/codex_tui.toml"
-
 if ! command -v codex >/dev/null 2>&1; then
     skip "Codex status line (Codex not installed)"
+elif python3 - "$CONFIG" <<'EOF'
+import sys, tomllib
+try:
+    d_tui = tomllib.load(open(sys.argv[1], "rb")).get("tui", {})
+except (OSError, tomllib.TOMLDecodeError):
+    sys.exit(1)
+sys.exit(0 if d_tui.get("status_line") == ["custom"] and d_tui.get("status_line_use_colors") is True else 1)
+EOF
+then
+    ok "status line"
 else
-    CODEX_CONFIG="$CONFIG" CODEX_DESIRED="$DESIRED" "$PYTHON3" "$SCRIPT_DIR/codex-patch/merge_codex_config.py"
+    fail "add to $CONFIG under [tui]: status_line = [\"custom\"] and status_line_use_colors = true"
 fi
 
 echo ""

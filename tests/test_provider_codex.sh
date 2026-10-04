@@ -51,12 +51,9 @@ line_count="$(printf '%s\n' "$TH_OUT" | wc -l | tr -d ' ')"
 assert_eq "renders exactly one line (one carousel page)" "1" "$line_count"
 assert_match "output is page 1, 2, or 3's known shape" "$TH_OUT" '🤖|🆔|💬'
 
-section "quota cache is seeded from the payload's rate_limits"
+section "heartbeat"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime2.XXXXXX")"
 run_codex "$FIXTURES/codex-payload.json" "$plain_dir"
-quota_cache="$STATUSLINE_RUNTIME_DIR/state/quota/codex"
-assert_file_exists "quota cache written from the payload" "$quota_cache"
-assert_contains "cached value matches the payload's 5h percent" "$(cat "$quota_cache")" "20"
 assert_file_exists "every render touches the liveness heartbeat agent-usage-tracker's poll_codex.py reads" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/codex"
 
@@ -73,6 +70,7 @@ assert_ne "page 2 was observed within ${POLL_DEADLINE_SECONDS}s" "" "$WAIT_RESUL
 assert_contains "page 2 shows the thread id" "$WAIT_RESULT" "thread-1"
 assert_contains "page 2 shows the thread title" "$WAIT_RESULT" "Fix the bug"
 assert_contains "'Read Only' + 'Approve for me' remap to Read/Auto" "$WAIT_RESULT" "Read/Auto"
+assert_contains "page 2 shows the resets summary" "$WAIT_RESULT" "Resets:"
 
 section "carousel: page 3 (bars)"
 wait_for_page "$FIXTURES/codex-payload.json" "$plain_dir" "💬"
@@ -95,8 +93,6 @@ section "minimal payload (no thread_title, no rate_limits)"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime4.XXXXXX")"
 run_codex "$FIXTURES/codex-payload-full-ask.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_file_missing "no rate_limits in the payload: quota cache not written" \
-    "$STATUSLINE_RUNTIME_DIR/state/quota/codex"
 assert_file_exists "heartbeat is still touched even with no rate_limits in the payload" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/codex"
 

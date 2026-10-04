@@ -1,11 +1,8 @@
 #!/bin/bash
 # End-to-end tests for install.sh, run against a temp $HOME so nothing ever
-# touches the real machine. `codex` is deliberately kept off PATH here (a
-# restricted PATH that excludes ~/.local/bin, where it's really installed) -
-# actually exercising the Codex binary patch would mean a real network clone
-# and Cargo build, which does not belong in this test suite. The TOML-merge
-# logic that install.sh's Codex-config step drives lives in its own file,
-# codex-patch/merge_codex_config.py, exercised directly below.
+# touches the real machine. `codex` is kept off PATH (actually exercising
+# the Codex binary patch means a real network clone and Cargo build), except
+# for a stub in the config-check section, where the patch step fails fast.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -60,34 +57,18 @@ assert_eq "now a symlink" "$th_home/opt/agent-statusline/providers/claude-status
     "$(readlink "$th_home/.claude/statusline-command.sh")"
 rm -rf "$th_home"
 
-section "Codex [tui] config merge"
-merge_script="$REPO_ROOT/codex-patch/merge_codex_config.py"
-
-merge_dir="$(mktemp -d "${TMPDIR:-/tmp}/th-mergecfg.XXXXXX")"
-
-section "  no existing config.toml"
-config="$merge_dir/none/config.toml"
-CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" python3 "$merge_script" >/dev/null
-assert_file_exists "creates config.toml with a [tui] table" "$config"
-assert_contains "selects the custom status-line item" "$(cat "$config")" 'status_line = ["custom"]'
-
-section "  existing [tui] table with unrelated keys is preserved"
-config="$merge_dir/unrelated/config.toml"
-mkdir -p "$(dirname "$config")"
-cat > "$config" <<'EOF'
-[tui]
-some_unrelated_key = true
-
-[other_table]
-x = 1
-EOF
-CODEX_CONFIG="$config" CODEX_DESIRED="$REPO_ROOT/codex-patch/codex_tui.toml" python3 "$merge_script" >/dev/null
-assert_contains "keeps the unrelated [tui] key" "$(cat "$config")" "some_unrelated_key = true"
-assert_contains "keeps the unrelated table entirely" "$(cat "$config")" "[other_table]"
-assert_contains "adds the status line keys" "$(cat "$config")" 'status_line = ["custom"]'
-python3 -c "import tomllib,sys; tomllib.load(open('$config','rb'))"
-assert_status "result is still valid TOML" 0 $?
-
-rm -rf "$merge_dir"
+section "Codex [tui] config is checked, never edited"
+stub_bin="$(mktemp -d "${TMPDIR:-/tmp}/th-codexstub.XXXXXX")"
+printf '#!/bin/sh\nexit 0\n' > "$stub_bin/codex"; chmod +x "$stub_bin/codex"
+th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
+TH_OUT="$(HOME="$th_home" PATH="$stub_bin:$CODEX_FREE_PATH" bash "$INSTALL" 2>/dev/null)"
+assert_contains "no config.toml: prints the keys to add" "$TH_OUT" 'status_line = ["custom"]'
+assert_file_missing "...and does not create the file" "$th_home/.codex/config.toml"
+printf '[tui]\nstatus_line = ["custom"]\nstatus_line_use_colors = true\n' > "$th_home/.codex/config.toml"
+before="$(cat "$th_home/.codex/config.toml")"
+TH_OUT="$(HOME="$th_home" PATH="$stub_bin:$CODEX_FREE_PATH" bash "$INSTALL" 2>/dev/null)"
+assert_not_contains "configured: nothing to add" "$TH_OUT" "add to"
+assert_eq "config.toml left byte-identical" "$before" "$(cat "$th_home/.codex/config.toml")"
+rm -rf "$th_home" "$stub_bin"
 
 harness_summary

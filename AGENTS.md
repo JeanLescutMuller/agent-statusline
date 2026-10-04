@@ -21,8 +21,6 @@ agent-statusline/
 ├── src/statusline/               # statusline architecture: shared cache/format lib + refresh scripts
 ├── codex-patch/                  # Codex patch: build-time, one-off, unrelated to what runs on a render
 │   ├── install-codex-statusline-patch.sh   # clone/patch/build/deploy the Codex binary
-│   ├── codex_tui.toml       # template merged into ~/.codex/config.toml's [tui] table
-│   ├── merge_codex_config.py  # the merge logic, run by install.sh's "codex config" step
 │   ├── supported-versions.tsv # exact release-commit allowlist
 │   └── patches/              # one shared, cross-version status-line patch
 └── tests/                    # hermetic bash test suite, see tests/README.md
@@ -62,7 +60,7 @@ can deliberately leave it alone - see its own header comment).
 
 Both are optional: absent, the statusline still renders.
 
-- `src/statusline/cache.sh`'s `statusline_read_static` shells out to `~/opt/bootstrap-home/bin/get_host_color` for the deterministic per-host color (falls back to a default). Owned by `bootstrap-home`.
+- `src/statusline/cache.sh`'s `statusline_read_host` shells out to `~/opt/bootstrap-home/bin/get_host_color` for the deterministic per-host color (falls back to a default). Owned by `bootstrap-home`.
 - **agent-usage-tracker** (`~/dev/agent-usage-tracker`, split out of this repo on 2026-09-30 - git history before that is here, up to `d744951`). The contract is three files, specified in README.md's "agent-usage-tracker" section: the Claude provider pipes its raw stdin payload into the tracker's `bin/ingest-claude-statusline.sh` and reads back its `state/quota/claude`; the tracker's pollers read this repo's `state/heartbeat/*` mtimes. Rules that keep it clean:
   - Only `providers/claude-statusline-command.sh` references the tracker (enforced by `tests/test_repo_hygiene.sh`), and neither project writes into the other's tree.
   - Forward the payload unchanged - never pick fields for the tracker here, so what it records can change without touching this repo.

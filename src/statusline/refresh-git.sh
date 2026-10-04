@@ -1,9 +1,10 @@
 #!/bin/bash
-# Prints: branch FS untracked FS unstaged FS staged FS conflicts
+# Prints: branch FS untracked FS unstaged FS staged FS conflicts FS ahead FS behind
+# ahead/behind compare against the local upstream ref, without fetching:
+# "behind" only moves after your own fetch or pull.
 set -uo pipefail
 
 root="$1"
-separator=$'\034'
 branch="$(git -C "$root" branch --show-current 2>/dev/null)"
 [ -n "$branch" ] || branch="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)" || exit 1
 counts="$(git -C "$root" status --porcelain=v2 2>/dev/null | awk '
@@ -16,5 +17,7 @@ counts="$(git -C "$root" status --porcelain=v2 2>/dev/null | awk '
     END { printf "%d %d %d %d", untracked+0, unstaged+0, staged+0, conflicts+0 }
 ')" || exit 1
 read -r untracked unstaged staged conflicts <<< "$counts"
-printf '%s%s%s%s%s%s%s%s%s\n' "$branch" "$separator" "$untracked" "$separator" \
-    "$unstaged" "$separator" "$staged" "$separator" "$conflicts"
+read -r ahead behind < <(git -C "$root" rev-list --left-right --count 'HEAD...@{upstream}' 2>/dev/null)
+fields=("$branch" "$untracked" "$unstaged" "$staged" "$conflicts" "${ahead:-0}" "${behind:-0}")
+IFS=$'\034'
+printf '%s\n' "${fields[*]}"

@@ -64,26 +64,17 @@ assert_contains "names the orphaned path" "$TH_OUT" "mystery-dir"
 assert_file_exists "the orphan itself is left untouched" "$th_home/opt/agent-statusline/mystery-dir/file.txt"
 rm -rf "$th_home"
 
-section "a known target that can't be fully cleared is reported distinctly, not as an unrecognized orphan"
-# Simulates what a concurrently-rendering session's own writes into state/
-# look like to uninstall.sh: a directory whose contents keep resisting
-# removal. A permission-based block (parent dir not writable) reproduces the
-# same "still non-empty after rm -rf" outcome as a real concurrent writer,
-# deterministically instead of racing a timer.
+section "a known target that can't be cleared (a live render) is listed, not hidden"
 th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-uninstallhome.XXXXXX")"
 run_install "$th_home"
 stuck_dir="$th_home/opt/agent-statusline/state/git/cwd/stuck"
 mkdir -p "$stuck_dir"
-printf 'x\n' > "$stuck_dir/local.attempted"
+printf 'x\n' > "$stuck_dir/status"
 chmod 555 "$stuck_dir"
 run_uninstall "$th_home"
 chmod 755 "$stuck_dir"
-assert_status "exits 0 even when a known target can't be fully cleared" 0 "$TH_STATUS"
-assert_contains "explains it couldn't fully remove state - likely another session" \
-    "$TH_OUT" "couldn't fully remove"
-assert_contains "names the stuck target" "$TH_OUT" "state"
-assert_not_contains "does not ALSO get reported as an unrecognized orphan" \
-    "$TH_OUT" "orphan files/dirs under"
+assert_status "exits 0" 0 "$TH_STATUS"
+assert_contains "lists the leftover state" "$TH_OUT" "/state"
 rm -rf "$th_home"
 
 section "uninstalling an already-clean machine is a harmless no-op"

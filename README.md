@@ -12,7 +12,7 @@ Usage tracking (quota percent, tokens and spend over time, pollers, telemetry, r
 bash install.sh
 ```
 
-Idempotent: safe to re-run any time against a machine that already has agent-statusline installed. It deploys the shared library and provider adapters (symlinked from `~/.claude/statusline-command.sh` and `~/.codex/statusline-command.sh`), and - only if `codex` is on `PATH` - builds/deploys the status-line-command patch and wires `~/.codex/config.toml`. Requires `python3` and `jq` on `PATH`.
+Idempotent: safe to re-run any time against a machine that already has agent-statusline installed. It deploys the shared library and provider adapters (symlinked from `~/.claude/statusline-command.sh` and `~/.codex/statusline-command.sh`), and - only if `codex` is on `PATH` - builds/deploys the status-line-command patch and checks `~/.codex/config.toml`. Requires `jq` (and `python3` for the Codex config check).
 
 `install.sh` assumes a bare machine and carries no legacy-layout migration logic. To move to an incompatible on-disk layout (or just start clean), run:
 
@@ -50,9 +50,7 @@ flowchart TB
         hbX[("heartbeat/codex")]
         ccC0[("quota/claude
         freshest stdin reading, tag X")]
-        ccX[("quota/codex
-        60s cache")]
-        ccOther[("system/metrics, git/&lt;cwd&gt;/*, static/*
+        ccOther[("system/metrics, git/&lt;cwd&gt;/status, host-color/*
         shared by both providers")]
     end
 
@@ -109,7 +107,7 @@ The whole contract between the two projects is three files, each written by exac
 | Statusline only | Freshest of every session's stdin; `–` until any session has a reading |
 | Tracker only | No statusline at all, so the tracker gets no payloads and records no push rows |
 
-Codex never depends on the tracker: its provider caches its own payload's rate limits in `state/quota/codex` (below).
+Codex never depends on the tracker: each Codex session shows its own payload's rate limits.
 
 ## Runtime layout
 
@@ -119,29 +117,19 @@ Deploys shared code and state under `~/opt/agent-statusline/`:
     ├── src/statusline/
     │   ├── cache.sh                      shared lazy-cache primitives (stale-while-revalidate, locking)
     │   ├── format.sh                     shared ANSI styling and segment formatting
-    │   ├── refresh-git-local.sh          branch/untracked/unstaged/staged/conflicts
-    │   ├── refresh-git-remote.sh         ahead/behind
+    │   ├── refresh-git.sh                branch/untracked/unstaged/staged/conflicts/ahead/behind (no fetch)
     │   └── refresh-metrics.sh            used/total/percent memory
     ├── providers/                        deployed adapters; ~/.claude and ~/.codex hold symlinks to these
     ├── state/
-    │   ├── static/
-    │   │   ├── hostname                  immutable short hostname
-    │   │   └── host-color                terminal color the hostname is printed in
+    │   ├── host-color/<hostname>         terminal color the hostname is printed in (the name itself is read live)
     │   ├── system/metrics                used GiB, total GiB, percent
     │   ├── heartbeat/
     │   │   ├── claude                    epoch of the last Claude render (read by agent-usage-tracker)
     │   │   └── codex                     epoch of the last Codex render (read by agent-usage-tracker)
-    │   ├── quota/
-    │   │   ├── claude                    freshest stdin reading of any session: 5h/7d percent+reset, tag X, observed_at
-    │   │   └── codex                     5h percent/reset, 7d percent/reset, from the Codex payload
+    │   ├── quota/claude                  freshest stdin reading of any session: 5h/7d percent+reset, tag X, observed_at
     │   ├── spin/                         per-provider spinner counters
-    │   └── git/cwd/.../
-    │       ├── local                     local Git snapshot for that cwd
-    │       └── remote                    remote Git snapshot for that cwd
-    ├── locks/                            atomic refresh locks
-    ├── logs/
-    │   ├── statusline.log                bounded shared refresh/write event log
-    │   └── statusline.log.1              previous log after 1 MiB rotation
+    │   └── git/cwd/.../status            Git snapshot for that cwd
+    ├── locks/                            refresh locks (noclobber files holding their epoch)
     └── codex-patch/                      Codex clone + build.log (kept by uninstall.sh)
 
 Dynamic value files use ASCII file-separator delimiters and have a sibling `.timestamp` containing their refresh epoch. Renderers read both with Bash built-ins. Only the provider JSON payload requires `jq`.
@@ -150,23 +138,21 @@ Dynamic value files use ASCII file-separator delimiters and have a sibling `.tim
 
 1. Read the existing value and timestamp.
 2. If fresh, render it without starting a refresher.
-3. If stale, try an atomic mkdir lock.
+3. If stale, try to create the lock file atomically (noclobber).
 4. If another session owns the lock, immediately render the stale value.
-5. The lock winner runs the relevant refresher synchronously with a hard timeout.
-6. Success atomically replaces value and timestamp; failure keeps stale data.
-7. A stale lock is atomically renamed to quarantine before removal.
+5. The lock winner stamps the timestamp, then runs the refresher synchronously with a hard timeout.
+6. Success atomically replaces the value; failure (or empty output) keeps the previous one until the next TTL - no retry on every render.
+7. A lock older than its stale limit (a killed renderer) is taken over.
 
 There is no polling daemon or scheduler. Work happens only for data currently being displayed, and sessions share machine-, provider-, and cwd-scoped results.
 
-The shared log records cache refresh/write events for both providers, including failure exit codes, safe stderr, and stale-cache age. It deliberately does not log every render: at 30 sessions and a four-second interval that would create roughly 650,000 lines per day and add avoidable I/O. Epoch timestamps keep the hot-path logger independent of another `date` subprocess.
+Nothing is logged: a failed refresh shows as a stale or missing segment. Rerun the refresher by hand (`bash ~/opt/agent-statusline/src/statusline/refresh-git.sh <dir>`) to see why.
 
 | Cache | Scope | TTL | Refresh timeout |
 |---|---|---:|---:|
-| Hostname/color | machine | static | none |
+| Host color | hostname | forever | none |
 | Memory | machine | 30s | 1s |
-| Codex quotas | Codex account | 60s | payload update |
-| Local Git | exact cwd | 8s | 1s |
-| Remote Git | exact cwd | 30s | 1s |
+| Git | exact cwd | 8s | 1s |
 
 Claude quotas aren't in this table: they are written on every render whose stdin has a newer reading than the cache, and compared with agent-usage-tracker's state file at display time (see "agent-usage-tracker" above). Codex contributes its latest payload snapshot to the shared provider cache because no separate stable local quota endpoint has been established - `providers/codex-statusline-command.sh` makes no network call of its own.
 
@@ -181,7 +167,7 @@ Codex's TUI does not natively support a `status_line_command` the way this proje
 
 Verbose clone/patch/compiler output is captured in `~/opt/agent-statusline/codex-patch/build.log`, never streamed to the terminal - only milestones and the final result print.
 
-`install.sh` then runs `codex-patch/merge_codex_config.py`, which owns just the `[tui]` keys `status_line` and `status_line_use_colors` in `~/.codex/config.toml`, merging in `codex-patch/codex_tui.toml` via `tomllib` and touching nothing else in that file. The patched binary reads `CODEX_STATUS_LINE_COMMAND` or falls back to `~/.codex/statusline-command.sh`.
+`install.sh` then checks, without editing, that `~/.codex/config.toml`'s `[tui]` has `status_line = ["custom"]` and `status_line_use_colors = true`, and prints those two lines when it doesn't. The patched binary reads `CODEX_STATUS_LINE_COMMAND` or falls back to `~/.codex/statusline-command.sh`.
 
 ## Source files
 
@@ -192,7 +178,7 @@ Statusline architecture (runs on every render):
 - `src/statusline/refresh-*.sh`: one bounded refresh attempt, without cache policy.
 - `providers/claude-statusline-command.sh`: Claude adapter and multiline layout; the only file that touches agent-usage-tracker.
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
-- `install.sh` + `utils.sh`: deployment and Codex config wiring - assumes a bare machine, no migration logic.
+- `install.sh` + `utils.sh`: deployment and the Codex config check - assumes a bare machine, no migration logic.
 - `uninstall.sh`: removes everything `install.sh` deploys; preserves `codex-patch/`; flags anything else left over as an orphan.
 
 Codex patch (build-time, one-off; see "Codex status-line patch" above):
@@ -200,8 +186,6 @@ Codex patch (build-time, one-off; see "Codex status-line patch" above):
 - `codex-patch/install-codex-statusline-patch.sh`: clone/patch/build/deploy the binary.
 - `codex-patch/supported-versions.tsv`: exact supported version/commit pairs.
 - `codex-patch/patches/`: the shared cross-version patch.
-- `codex-patch/codex_tui.toml`: template merged into `~/.codex/config.toml`'s `[tui]` table.
-- `codex-patch/merge_codex_config.py`: the merge logic, run by `install.sh`'s "codex config" step.
 
 ## Tests
 

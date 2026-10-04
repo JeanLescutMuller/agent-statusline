@@ -13,19 +13,6 @@ statusline_display_path "$HOME/proj/sub" out; assert_eq "home-prefixed path coll
 statusline_display_path "/etc/other" out; assert_eq "non-home path unchanged" "/etc/other" "$out"
 statusline_display_path "${HOME}x/proj" out; assert_eq "home-lookalike prefix not collapsed" "${HOME}x/proj" "$out"
 
-section "statusline_ordinal_suffix"
-assert_eq "1 -> st" "st" "$(statusline_ordinal_suffix 1)"
-assert_eq "2 -> nd" "nd" "$(statusline_ordinal_suffix 2)"
-assert_eq "3 -> rd" "rd" "$(statusline_ordinal_suffix 3)"
-assert_eq "4 -> th" "th" "$(statusline_ordinal_suffix 4)"
-assert_eq "11 -> th" "th" "$(statusline_ordinal_suffix 11)"
-assert_eq "12 -> th" "th" "$(statusline_ordinal_suffix 12)"
-assert_eq "13 -> th" "th" "$(statusline_ordinal_suffix 13)"
-assert_eq "21 -> st" "st" "$(statusline_ordinal_suffix 21)"
-assert_eq "22 -> nd" "nd" "$(statusline_ordinal_suffix 22)"
-assert_eq "23 -> rd" "rd" "$(statusline_ordinal_suffix 23)"
-assert_eq "31 -> st" "st" "$(statusline_ordinal_suffix 31)"
-
 section "statusline_severity_color (default 70% yellow threshold)"
 statusline_severity_color 10 70 out; assert_eq "10% is green" "$STATUSLINE_GREEN" "$out"
 statusline_severity_color 69 70 out; assert_eq "69% is still green" "$STATUSLINE_GREEN" "$out"
@@ -45,27 +32,19 @@ assert_eq "100% fully fills" "████████" "$(strip_ansi "$out")"
 statusline_bar 150 8 "$STATUSLINE_GREEN" out
 assert_eq "over 100% clamps to full width, not overflow" "████████" "$(strip_ansi "$out")"
 
-section "statusline_limit_segment"
-statusline_limit_segment 5h "" "" 0 out
+section "statusline_meter_segment"
+statusline_meter_segment 5h "" 70 out
 assert_contains "no reading: a dash" "$out" "–"
 assert_not_contains "no reading: never a percent" "$out" "%"
-statusline_limit_segment 5h 42 "" 0 out
-assert_contains "under 100%: shows a bar and the percent" "$out" "42%"
-assert_not_contains "under 100%: no Blocked text" "$out" "Blocked"
+statusline_meter_segment 5h 42 70 out
+assert_contains "shows a bar and the percent" "$out" "42%"
 assert_not_contains "no origin tag on screen" "$out" "("
-statusline_limit_segment 7d 100 1700000600 1700000000 out
-assert_contains "at 100% with numeric reset: Blocked" "$out" "Blocked"
-assert_contains "at 100% with numeric reset: shows remaining time" "$out" "resets in"
-statusline_limit_segment 7d 100 "tomorrow" 1700000000 out
-assert_contains "at 100% with non-numeric reset: shown verbatim" "$out" "resets tomorrow"
-statusline_limit_segment 7d 120 "" 0 out
-assert_contains "over 100% with no reset info still renders a bar" "$out" "120%"
-
-section "statusline_context_segment"
-statusline_context_segment 10 out
-assert_contains "under 40%: green" "$out" "$STATUSLINE_GREEN"
-statusline_context_segment 50 out
-assert_contains "over 40%: yellow kicks in" "$out" "$STATUSLINE_YELLOW"
+statusline_meter_segment 7d 120 70 out
+assert_contains "over 100% still renders a bar" "$out" "120%"
+statusline_meter_segment 💬 10 40 out
+assert_contains "under the threshold: green" "$out" "$STATUSLINE_GREEN"
+statusline_meter_segment 💬 50 40 out
+assert_contains "over the threshold: yellow" "$out" "$STATUSLINE_YELLOW"
 
 section "statusline_git_segment"
 statusline_git_segment "" 0 0 0 0 0 0 out
@@ -95,22 +74,6 @@ assert_contains "behind count shown" "$out" "⇣6"
 
 statusline_git_segment "main" 0 0 0 2 0 0 out
 assert_contains "conflict count shown" "$out" "✖2"
-
-section "statusline_rotating_time"
-statusline_rotating_time 0 "08/30 12:00:00" 1700000000 1600000000 out
-assert_eq "index 0 always shows the raw datetime" "08/30 12:00:00" "$out"
-
-statusline_rotating_time 1 "08/30 12:00:00" 1700000000 1600000000 out
-assert_contains "index 1 with numeric week_reset formats a 7d reset line" "$out" "7d reset on"
-
-statusline_rotating_time 1 "08/30 12:00:00" "unknown" 1600000000 out
-assert_eq "index 1 with non-numeric week_reset falls back to datetime" "08/30 12:00:00" "$out"
-
-statusline_rotating_time 2 "08/30 12:00:00" 1700000000 1600000000 out
-assert_contains "index 2 with numeric five_reset formats a 5h reset line" "$out" "5h reset at"
-
-statusline_rotating_time 2 "08/30 12:00:00" 1700000000 "unknown" out
-assert_eq "index 2 with non-numeric five_reset falls back to datetime" "08/30 12:00:00" "$out"
 
 section "statusline_spinner_frame"
 statusline_spinner_frame 3 out; assert_eq "frame 3 picks the 4th glyph" "⠸" "$out"

@@ -35,9 +35,8 @@ pages 1/2/3 as they come up.
 |---|---|
 | `harness.sh` | The assert helpers + fixture/isolation utilities every test file sources |
 | `test_format.sh` | `src/statusline/format.sh` - pure functions, including the `–` for a missing quota reading |
-| `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh/write, quota state files (write-if-newer, freshest-of overlay, transcript `observed_at` incl. the DST regression), static read, log rotation |
-| `test_refresh_git_local.sh` | `src/statusline/refresh-git-local.sh` against real temp repos |
-| `test_refresh_git_remote.sh` | `src/statusline/refresh-git-remote.sh` against a real local bare remote |
+| `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh, quota state files (write-if-newer, freshest-of overlay, transcript `observed_at` incl. the DST regression), host read |
+| `test_refresh_git.sh` | `src/statusline/refresh-git.sh` against real temp repos and a local bare remote |
 | `test_refresh_metrics.sh` | `src/statusline/refresh-metrics.sh` on the real host |
 | `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the `–` with no reading, cross-session convergence without the tracker, and the contract against a stub tracker (payload forwarded, fresher tracker reading wins, stale one never freezes the display) |
 | `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |

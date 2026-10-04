@@ -38,10 +38,11 @@ thread_title="${values[4]:-}"
 permissions="${values[5]:-}"
 approval="${values[6]:-}"
 context_pct="${values[7]:-0}"
-payload_five_pct="${values[8]:-}"
-payload_five_reset="${values[9]:-}"
-payload_week_pct="${values[10]:-}"
-payload_week_reset="${values[11]:-}"
+# Percents are empty when unknown: the segment then shows a dash.
+five_pct="${values[8]:-}"
+five_reset="${values[9]:-}"
+week_pct="${values[10]:-}"
+week_reset="${values[11]:-}"
 now="${values[12]:-0}"
 page=$((now / 4 % 3 + 1))
 
@@ -49,16 +50,6 @@ statusline_touch_heartbeat codex "$now"
 
 model_display="$model"
 [ -n "$reasoning" ] && model_display="$model ($reasoning)"
-
-quota_cache="$STATUSLINE_STATE_DIR/quota/codex"
-if [ -n "$payload_five_pct" ] || [ -n "$payload_week_pct" ]; then
-    statusline_write_values_if_stale "$quota_cache" 60 codex-quota 4 "$now" \
-        "$payload_five_pct" "$payload_five_reset" "$payload_week_pct" "$payload_week_reset"
-fi
-# Empty when unknown: the segment then shows a dash, not a made-up 0%.
-five_pct="$payload_five_pct"; five_reset="$payload_five_reset"
-week_pct="$payload_week_pct"; week_reset="$payload_week_reset"
-statusline_overlay_quota_cache "$quota_cache"
 
 statusline_common_segments
 
@@ -77,16 +68,10 @@ security="$permissions"
 [ -n "$approval" ] && security="${security}${security:+/}${approval}"
 [ -n "$security" ] && extra_segment="${extra_segment}    ${STATUSLINE_BLUE}🔐 ${security}${STATUSLINE_RESET}"
 
-rotate=""
-if [ "$page" -eq 2 ]; then
-    rotate_index=$((now / 12 % 2 + 1))
-    statusline_rotating_time "$rotate_index" "" "$week_reset" "$five_reset" rotate
-fi
-rotate_segment=""
-[ -n "$rotate" ] && rotate_segment="    ${rotate}"
+statusline_resets_segment "$now" "$five_reset" "$week_reset" resets_segment
 
 line_1="${STATUSLINE_GRAY_1}🤖 ${model_display}${STATUSLINE_RESET}    ${host_color}🖥️  ${STATUSLINE_HOSTNAME}${STATUSLINE_RESET}    ${STATUSLINE_GRAY_2}📂 ${display_cwd}${STATUSLINE_RESET}${git_segment}"
-line_2="${STATUSLINE_GRAY_4}🆔 ${thread_id}${rotate_segment}${STATUSLINE_RESET}${extra_segment}"
+line_2="${STATUSLINE_GRAY_4}🆔 ${thread_id}    ${resets_segment}${STATUSLINE_RESET}${extra_segment}"
 line_3="${context_segment}    ${five_segment}    ${week_segment}${memory_segment}"
 
 case "$page" in
