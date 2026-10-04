@@ -71,7 +71,6 @@ assert_ne "back-to-back renders show different spinner frames" "$spin_a" "$spin_
 assert_contains "line 3 shows the context percentage" "$TH_OUT" "42%"
 assert_contains "line 3 shows the 5h percentage" "$TH_OUT" "55%"
 assert_contains "line 3 shows the 7d percentage" "$TH_OUT" "70%"
-assert_contains "5h shows this render's own reading, via the own cache" "$TH_OUT" "55%"
 
 section "full payload outside a git repo"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
@@ -88,44 +87,34 @@ line3="$(printf '%s\n' "$TH_OUT" | sed -n 3p)"
 assert_match "no quota reading anywhere: 5h shows a dash" "$line3" '5h.*–'
 assert_match "...and 7d too" "$line3" '7d.*–'
 assert_eq "...never a made-up 0% (only the context segment has a %)" "1" "$(printf '%s' "$line3" | grep -o '%' | wc -l | tr -d ' ')"
-assert_file_missing "no reading, so no own cache file written" "$STATUSLINE_RUNTIME_DIR/state/quota/claude"
 
 section "rate_limits without a five_hour window: 0%, not a dash or an old value"
 # The API reports utilization 0 / resets_at null when no 5h window is open,
 # and stdin then omits five_hour.
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-nowindow.XXXXXX")"
-printf '{"type":"assistant","timestamp":"2026-01-02T00:00:00Z"}\n' > "$TH_TMP/t-nowin.jsonl"
-jq --arg t "$TH_TMP/t-nowin.jsonl" '. + {transcript_path: $t, rate_limits: {seven_day: {used_percentage: 16, resets_at: 1788307200}}}' \
+jq '. + {rate_limits: {seven_day: {used_percentage: 16, resets_at: 1788307200}}}' \
     "$FIXTURES/claude-payload.json" > "$TH_TMP/payload-nowin.json"
 run_claude "$TH_TMP/payload-nowin.json" "$plain_dir"
 assert_contains "5h shows 0%" "$TH_OUT" "5h"
 assert_match "5h is 0%" "$(printf '%s\n' "$TH_OUT" | sed -n 3p)" '5h.*\] .*0%'
 assert_contains "7d from stdin" "$TH_OUT" "16%"
 
-section "agent-usage-tracker absent: the own cache still makes sessions converge"
-# Three "sessions" with their own stdin readings: A's last message was
-# earliest, B's later, C hasn't sent one. Whichever reading is freshest
-# (transcript timestamp) is shown by all of them.
-STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-conv.XXXXXX")"
+section "agent-usage-tracker absent: each session shows its own reading"
+STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-solo.XXXXXX")"
 payload_for() {
-    local pct="$1" ts="$2" out="$3" transcript
-    transcript="$TH_TMP/transcript-$pct.jsonl"
-    printf '{"type":"assistant","timestamp":"%s"}\n' "$ts" > "$transcript"
-    jq --arg t "$transcript" --argjson p "$pct" \
-        '. + {transcript_path: $t, rate_limits: (.rate_limits + {five_hour: {used_percentage: $p, resets_at: 1788091200}})}' \
-        "$FIXTURES/claude-payload.json" > "$out"
+    jq --argjson p "$1" '. + {rate_limits: (.rate_limits + {five_hour: {used_percentage: $p, resets_at: 1788091200}})}' \
+        "$FIXTURES/claude-payload.json" > "$2"
 }
-payload_for 24 "2026-01-01T00:00:00.000Z" "$TH_TMP/payload-a.json"
-payload_for 25 "2026-01-01T00:05:00.000Z" "$TH_TMP/payload-b.json"
+payload_for 24 "$TH_TMP/payload-a.json"
+payload_for 25 "$TH_TMP/payload-b.json"
 run_claude "$TH_TMP/payload-a.json" "$plain_dir"
 assert_contains "session A shows its own 24%" "$TH_OUT" "24%"
 run_claude "$TH_TMP/payload-b.json" "$plain_dir"
-assert_contains "session B shows its own, newer 25%" "$TH_OUT" "25%"
+assert_contains "session B shows its own 25%" "$TH_OUT" "25%"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_contains "session C (no message yet) shows B's reading, not a dash" "$TH_OUT" "25%"
-run_claude "$TH_TMP/payload-a.json" "$plain_dir"
-assert_contains "session A re-renders its stale 24% but shows B's 25%" "$TH_OUT" "25%"
+assert_match "session C (no reading) shows a dash" "$(printf '%s\n' "$TH_OUT" | sed -n 3p)" '5h.*–'
 assert_file_missing "nothing is created under the tracker's directory" "$AGENT_USAGE_TRACKER_DIR"
+assert_file_missing "no quota file of our own" "$STATUSLINE_RUNTIME_DIR/state/quota"
 assert_file_exists "every render touches the liveness heartbeat the tracker's pollers read" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
 
@@ -143,53 +132,26 @@ STUB
     chmod +x "$dir/bin/ingest-claude-statusline.sh"
 }
 
-section "an idle session's frozen reading never beats a fresher one"
-# Regression (2026-10-01): a session idle for days keeps sending its old
-# reading while its transcript gains entries without an assistant message;
-# it used to be stamped "now" and froze every statusline on it.
-printf '%s\n' '{"type":"assistant","timestamp":"2025-12-30T00:00:00Z"}' \
-    '{"type":"attachment","timestamp":"2026-01-05T00:00:00Z"}' '{"type":"ai-title"}' > "$TH_TMP/t-idle.jsonl"
-jq --arg t "$TH_TMP/t-idle.jsonl" '. + {transcript_path: $t, rate_limits: {seven_day: {used_percentage: 11, resets_at: 1788307200}}}' \
-    "$FIXTURES/claude-payload.json" > "$TH_TMP/payload-idle.json"
-run_claude "$TH_TMP/payload-idle.json" "$plain_dir"
-assert_contains "the idle session shows B's fresher reading" "$TH_OUT" "25%"
-assert_not_contains "...not its own frozen 11%" "$TH_OUT" "11%"
-printf '%s\n' '{"type":"ai-title"}' '{"type":"mode"}' > "$TH_TMP/t-idle.jsonl"
-run_claude "$TH_TMP/payload-idle.json" "$plain_dir"
-assert_contains "no assistant message at all: still B's reading (unknown age never wins)" "$TH_OUT" "25%"
-
-section "agent-usage-tracker present: the raw payload goes in, a fresher tracker reading wins"
-# A's own reading is from 2026-01-01T00:00Z (1767225600); the tracker's
-# poll is later.
-STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-tracker.XXXXXX")"
+section "agent-usage-tracker present: the raw payload goes in, its state file is shown"
 AGENT_USAGE_TRACKER_DIR="$TH_TMP/tracker"
-stub_tracker "$AGENT_USAGE_TRACKER_DIR" "61${SEP}1788091200${SEP}72${SEP}1788307200${SEP}P${SEP}1767229200"
+stub_tracker "$AGENT_USAGE_TRACKER_DIR" "61${SEP}1788091200${SEP}72${SEP}1788307200${SEP}statusline${SEP}1767229200"
 run_claude "$TH_TMP/payload-a.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_eq "the ingest script receives the stdin payload unchanged (bar the trailing newline)" \
     "$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json")" "$(cat "$AGENT_USAGE_TRACKER_DIR/received.json")"
-assert_contains "5h comes from the tracker's newer reading, " "$TH_OUT" "61%"
+assert_contains "5h comes from the tracker's file, whatever its source" "$TH_OUT" "61%"
 assert_contains "7d too" "$TH_OUT" "72%"
+assert_not_contains "not this session's own 24%" "$TH_OUT" "24%"
 rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_file_exists "a payload without rate_limits is forwarded too - the tracker decides" \
     "$AGENT_USAGE_TRACKER_DIR/received.json"
-assert_contains "a render with no rate_limits shows the freshest reading" "$TH_OUT" "61%"
+assert_contains "a render with no rate_limits shows the tracker's reading" "$TH_OUT" "61%"
 
-section "a stale tracker file never freezes the display (e.g. a broken ingest script)"
-STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-stale.XXXXXX")"
-stub_tracker "$AGENT_USAGE_TRACKER_DIR" "99${SEP}${SEP}99${SEP}${SEP}P${SEP}1000"
+section "a tracker file without a 5h percent falls back to this session's reading"
+stub_tracker "$AGENT_USAGE_TRACKER_DIR" "${SEP}${SEP}${SEP}${SEP}API${SEP}1767229200"
 run_claude "$TH_TMP/payload-b.json" "$plain_dir"
-assert_contains "this render's newer own reading is shown" "$TH_OUT" "25%"
-assert_not_contains "the stale 99% is not" "$TH_OUT" "99%"
-
-section "the tracker's X readings are ignored, however fresh they claim to be"
-# Regression (2026-10-02): the tracker stamped an idle session's frozen
-# reading "now", and the display flapped to it.
-stub_tracker "$AGENT_USAGE_TRACKER_DIR" "0${SEP}${SEP}11${SEP}${SEP}X${SEP}9999999999"
-run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_contains "the own cache's reading is shown" "$TH_OUT" "25%"
-assert_not_contains "not the tracker's X reading" "$TH_OUT" "11%"
+assert_contains "this session's 25% is shown" "$TH_OUT" "25%"
 
 section "a failing ingest script never breaks the render"
 cat > "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh" <<'STUB'
