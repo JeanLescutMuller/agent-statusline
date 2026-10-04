@@ -71,7 +71,7 @@ assert_ne "back-to-back renders show different spinner frames" "$spin_a" "$spin_
 assert_contains "line 3 shows the context percentage" "$TH_OUT" "42%"
 assert_contains "line 3 shows the 5h percentage" "$TH_OUT" "55%"
 assert_contains "line 3 shows the 7d percentage" "$TH_OUT" "70%"
-assert_contains "5h is tagged X - this render's own reading, via the own cache" "$TH_OUT" "55% (X)"
+assert_contains "5h shows this render's own reading, via the own cache" "$TH_OUT" "55%"
 
 section "full payload outside a git repo"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
@@ -99,8 +99,8 @@ jq --arg t "$TH_TMP/t-nowin.jsonl" '. + {transcript_path: $t, rate_limits: {seve
     "$FIXTURES/claude-payload.json" > "$TH_TMP/payload-nowin.json"
 run_claude "$TH_TMP/payload-nowin.json" "$plain_dir"
 assert_contains "5h shows 0%" "$TH_OUT" "5h"
-assert_match "5h is 0% (X)" "$(printf '%s\n' "$TH_OUT" | sed -n 3p)" '5h.*\] .*0% \(X\)'
-assert_contains "7d from stdin" "$TH_OUT" "16% (X)"
+assert_match "5h is 0%" "$(printf '%s\n' "$TH_OUT" | sed -n 3p)" '5h.*\] .*0%'
+assert_contains "7d from stdin" "$TH_OUT" "16%"
 
 section "agent-usage-tracker absent: the own cache still makes sessions converge"
 # Three "sessions" with their own stdin readings: A's last message was
@@ -118,13 +118,13 @@ payload_for() {
 payload_for 24 "2026-01-01T00:00:00.000Z" "$TH_TMP/payload-a.json"
 payload_for 25 "2026-01-01T00:05:00.000Z" "$TH_TMP/payload-b.json"
 run_claude "$TH_TMP/payload-a.json" "$plain_dir"
-assert_contains "session A shows its own 24%" "$TH_OUT" "24% (X)"
+assert_contains "session A shows its own 24%" "$TH_OUT" "24%"
 run_claude "$TH_TMP/payload-b.json" "$plain_dir"
-assert_contains "session B shows its own, newer 25%" "$TH_OUT" "25% (X)"
+assert_contains "session B shows its own, newer 25%" "$TH_OUT" "25%"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_contains "session C (no message yet) shows B's reading, not a dash" "$TH_OUT" "25% (X)"
+assert_contains "session C (no message yet) shows B's reading, not a dash" "$TH_OUT" "25%"
 run_claude "$TH_TMP/payload-a.json" "$plain_dir"
-assert_contains "session A re-renders its stale 24% but shows B's 25%" "$TH_OUT" "25% (X)"
+assert_contains "session A re-renders its stale 24% but shows B's 25%" "$TH_OUT" "25%"
 assert_file_missing "nothing is created under the tracker's directory" "$AGENT_USAGE_TRACKER_DIR"
 assert_file_exists "every render touches the liveness heartbeat the tracker's pollers read" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
@@ -152,11 +152,11 @@ printf '%s\n' '{"type":"assistant","timestamp":"2025-12-30T00:00:00Z"}' \
 jq --arg t "$TH_TMP/t-idle.jsonl" '. + {transcript_path: $t, rate_limits: {seven_day: {used_percentage: 11, resets_at: 1788307200}}}' \
     "$FIXTURES/claude-payload.json" > "$TH_TMP/payload-idle.json"
 run_claude "$TH_TMP/payload-idle.json" "$plain_dir"
-assert_contains "the idle session shows B's fresher reading" "$TH_OUT" "25% (X)"
+assert_contains "the idle session shows B's fresher reading" "$TH_OUT" "25%"
 assert_not_contains "...not its own frozen 11%" "$TH_OUT" "11%"
 printf '%s\n' '{"type":"ai-title"}' '{"type":"mode"}' > "$TH_TMP/t-idle.jsonl"
 run_claude "$TH_TMP/payload-idle.json" "$plain_dir"
-assert_contains "no assistant message at all: still B's reading (unknown age never wins)" "$TH_OUT" "25% (X)"
+assert_contains "no assistant message at all: still B's reading (unknown age never wins)" "$TH_OUT" "25%"
 
 section "agent-usage-tracker present: the raw payload goes in, a fresher tracker reading wins"
 # A's own reading is from 2026-01-01T00:00Z (1767225600); the tracker's
@@ -168,19 +168,19 @@ run_claude "$TH_TMP/payload-a.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_eq "the ingest script receives the stdin payload unchanged (bar the trailing newline)" \
     "$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json")" "$(cat "$AGENT_USAGE_TRACKER_DIR/received.json")"
-assert_contains "5h comes from the tracker's newer reading, with its tag" "$TH_OUT" "61% (P)"
-assert_contains "7d too" "$TH_OUT" "72% (P)"
+assert_contains "5h comes from the tracker's newer reading, " "$TH_OUT" "61%"
+assert_contains "7d too" "$TH_OUT" "72%"
 rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_file_exists "a payload without rate_limits is forwarded too - the tracker decides" \
     "$AGENT_USAGE_TRACKER_DIR/received.json"
-assert_contains "a render with no rate_limits shows the freshest reading" "$TH_OUT" "61% (P)"
+assert_contains "a render with no rate_limits shows the freshest reading" "$TH_OUT" "61%"
 
 section "a stale tracker file never freezes the display (e.g. a broken ingest script)"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-stale.XXXXXX")"
 stub_tracker "$AGENT_USAGE_TRACKER_DIR" "99${SEP}${SEP}99${SEP}${SEP}P${SEP}1000"
 run_claude "$TH_TMP/payload-b.json" "$plain_dir"
-assert_contains "this render's newer own reading is shown" "$TH_OUT" "25% (X)"
+assert_contains "this render's newer own reading is shown" "$TH_OUT" "25%"
 assert_not_contains "the stale 99% is not" "$TH_OUT" "99%"
 
 section "the tracker's X readings are ignored, however fresh they claim to be"
@@ -188,7 +188,7 @@ section "the tracker's X readings are ignored, however fresh they claim to be"
 # reading "now", and the display flapped to it.
 stub_tracker "$AGENT_USAGE_TRACKER_DIR" "0${SEP}${SEP}11${SEP}${SEP}X${SEP}9999999999"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_contains "the own cache's reading is shown" "$TH_OUT" "25% (X)"
+assert_contains "the own cache's reading is shown" "$TH_OUT" "25%"
 assert_not_contains "not the tracker's X reading" "$TH_OUT" "11%"
 
 section "a failing ingest script never breaks the render"

@@ -93,7 +93,6 @@ tracker_quota="$tracker_dir/state/quota/claude"
 tracker_source=""
 [ -f "$tracker_quota" ] && IFS="$STATUSLINE_FIELD_SEPARATOR" read -r _ _ _ _ tracker_source _ < "$tracker_quota"
 [ "$tracker_source" = P ] || tracker_quota=""
-quota_source=""
 statusline_overlay_freshest_quota "$own_quota" ${tracker_quota:+"$tracker_quota"}
 
 statusline_common_segments

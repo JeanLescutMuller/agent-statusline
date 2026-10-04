@@ -230,24 +230,23 @@ statusline_advance_spin_index() {
 }
 
 # Overlays cached FS-separated quota values onto the caller's own
-# five_pct/five_reset/week_pct/week_reset/quota_source (same implicit-variable
+# five_pct/five_reset/week_pct/week_reset (same implicit-variable
 # convention as statusline_common_segments in format.sh) - only overlays
 # fields the cache has a non-empty value for, so a not-yet-populated cache
 # can't blank out a caller's already-live value. Field 5 is an origin tag
 # (X = a statusline render's own stdin, P = agent-usage-tracker's poller),
-# field 6 the observed_at epoch the writers compare on - never displayed
-# here, hence the throwaway `_`.
+# field 6 the observed_at epoch the writers compare on - neither is
+# displayed, hence the throwaway `_`s.
 statusline_overlay_quota_cache() {
     local quota_cache="$1"
-    local cached_five_pct cached_five_reset cached_week_pct cached_week_reset cached_source _
+    local cached_five_pct cached_five_reset cached_week_pct cached_week_reset _
     [ -f "$quota_cache" ] || return
     IFS="$STATUSLINE_FIELD_SEPARATOR" read -r cached_five_pct cached_five_reset \
-        cached_week_pct cached_week_reset cached_source _ < "$quota_cache"
+        cached_week_pct cached_week_reset _ _ < "$quota_cache"
     [ -n "$cached_five_pct" ] && five_pct="$cached_five_pct"
     [ -n "$cached_five_reset" ] && five_reset="$cached_five_reset"
     [ -n "$cached_week_pct" ] && week_pct="$cached_week_pct"
     [ -n "$cached_week_reset" ] && week_reset="$cached_week_reset"
-    [ -n "$cached_source" ] && quota_source="$cached_source"
 }
 
 # statusline_overlay_freshest_quota <file>... - overlays whichever of the

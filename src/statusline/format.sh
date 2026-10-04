@@ -173,9 +173,8 @@ statusline_bar() {
 }
 
 statusline_limit_segment() {
-    local label="$1" pct="$2" resets="$3" now="$4" source="$5" output_name="$6"
-    local color bar remain hours minutes result tag
-    tag="${source:+ (${source})}"
+    local label="$1" pct="$2" resets="$3" now="$4" output_name="$5"
+    local color bar remain hours minutes result
     # No reading at all (e.g. a Claude session before its first message,
     # with no cached reading either): a dash, never a made-up 0%.
     if [ -z "$pct" ]; then
@@ -188,13 +187,13 @@ statusline_limit_segment() {
         if [[ "$resets" =~ ^[0-9]+$ ]]; then
             remain=$((resets - now)); [ "$remain" -lt 0 ] && remain=0
             hours=$((remain / 3600)); minutes=$(((remain % 3600) / 60))
-            result="${STATUSLINE_RED}${label} Blocked - resets in ${hours}h ${minutes}m${tag}${STATUSLINE_RESET}"
+            result="${STATUSLINE_RED}${label} Blocked - resets in ${hours}h ${minutes}m${STATUSLINE_RESET}"
         else
-            result="${STATUSLINE_RED}${label} Blocked - resets ${resets}${tag}${STATUSLINE_RESET}"
+            result="${STATUSLINE_RED}${label} Blocked - resets ${resets}${STATUSLINE_RESET}"
         fi
     else
         statusline_bar "$pct" 8 "$color" bar
-        result="${color}${label}${STATUSLINE_RESET} [${bar}] ${color}${pct}%${tag}${STATUSLINE_RESET}"
+        result="${color}${label}${STATUSLINE_RESET} [${bar}] ${color}${pct}%${STATUSLINE_RESET}"
     fi
     printf -v "$output_name" '%s' "$result"
 }
@@ -267,8 +266,8 @@ statusline_common_segments() {
     statusline_display_path "$cwd" display_cwd
 
     statusline_context_segment "$context_pct" context_segment
-    statusline_limit_segment 5h "$five_pct" "$five_reset" "$now" "${quota_source:-}" five_segment
-    statusline_limit_segment 7d "$week_pct" "$week_reset" "$now" "${quota_source:-}" week_segment
+    statusline_limit_segment 5h "$five_pct" "$five_reset" "$now" five_segment
+    statusline_limit_segment 7d "$week_pct" "$week_reset" "$now" week_segment
 
     memory_segment=""
     if [ -n "$mem_used" ] && [ -n "$mem_total" ]; then
