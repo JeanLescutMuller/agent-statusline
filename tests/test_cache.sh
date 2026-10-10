@@ -117,7 +117,13 @@ th_tmp_runtime
 source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 statusline_read_host
-assert_eq "hostname read live" "$(hostname -s 2>/dev/null || hostname)" "$STATUSLINE_HOSTNAME"
+want=$(if [ "$(uname)" = Darwin ]; then scutil --get HostName; else cat /etc/hostname; fi 2>/dev/null); want=${want%%.*}
+assert_eq "hostname: the machine's name (\"Machine name\" in ~/AGENTS.md)" "$want" "$STATUSLINE_HOSTNAME"
+JR_MACHINE_NAME=box.example statusline_read_host
+assert_eq "hostname: JR_MACHINE_NAME first, cut at the first dot" "box" "$STATUSLINE_HOSTNAME"
+JR_MACHINE_NAME='a b' statusline_read_host
+assert_eq "hostname: no valid name shows ?" "?" "$STATUSLINE_HOSTNAME"
+statusline_read_host
 assert_match "host color is numeric" "$STATUSLINE_HOST_COLOR" '^[0-9]+$'
 assert_file_exists "color cached under the hostname" "$STATUSLINE_STATE_DIR/host-color/$STATUSLINE_HOSTNAME"
 printf '77\n' > "$STATUSLINE_STATE_DIR/host-color/$STATUSLINE_HOSTNAME"

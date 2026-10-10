@@ -114,12 +114,15 @@ statusline_advance_spin_index() {
     printf -v "$output_name" '%s' "$next"
 }
 
-# Sets STATUSLINE_HOSTNAME (read live: macOS renames the host, e.g. a "-1"
-# suffix on a name clash) and STATUSLINE_HOST_COLOR (cached per hostname,
-# from bootstrap-home's get_host_color, default 45).
+# Sets STATUSLINE_HOSTNAME (the machine's name, "?" when it has none) and
+# STATUSLINE_HOST_COLOR (cached per name, from bootstrap-home's
+# get_host_color, default 45).
 statusline_read_host() {
-    local color_file
-    STATUSLINE_HOSTNAME="$(hostname -s 2>/dev/null || hostname)"
+    local color_file m
+    # This machine's name: "Machine name" in ~/AGENTS.md (copy it identically)
+    m=${JR_MACHINE_NAME:-$(if [ "$(uname)" = Darwin ]; then scutil --get HostName; else cat /etc/hostname; fi 2>/dev/null)} || :
+    m=${m%%.*}; [[ $m =~ ^[A-Za-z0-9-]+$ ]] || m='?'
+    STATUSLINE_HOSTNAME=$m
     color_file="$STATUSLINE_STATE_DIR/host-color/$STATUSLINE_HOSTNAME"
     if [ -s "$color_file" ]; then
         IFS= read -r STATUSLINE_HOST_COLOR < "$color_file"
