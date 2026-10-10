@@ -26,7 +26,7 @@ pages 1/2/3 as they come up.
   `test_codex_patch_guards.sh` without ever reaching that path.
 - agent-usage-tracker itself. `test_provider_claude.sh` covers this repo's
   side of the contract against a stub tracker (payload piped in unchanged,
-  state file read back, a failing or absent tracker never breaks a render);
+  its printed line shown, a failing or absent tracker never breaks a render);
   the tracker's side is tested in its own repo.
 
 ## Files

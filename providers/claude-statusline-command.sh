@@ -51,17 +51,18 @@ five_reset="${values[6]:-}"
 week_pct="${values[7]:-}"
 week_reset="${values[8]:-}"
 
-# Hand this render's raw payload to agent-usage-tracker, unchanged, then
-# show the tracker's state/quota/claude: the account's freshest reading from
-# any session or its poller, so every open session shows the same number.
-# Fire-and-forget: output and failures are ignored. Without the tracker (or
-# its file), each session shows its own reading.
-tracker_quota="$tracker_dir/state/quota/claude"
-if [ -x "$tracker_dir/bin/ingest-claude-statusline.sh" ]; then
-    printf '%s' "$payload" | "$tracker_dir/bin/ingest-claude-statusline.sh" >/dev/null 2>&1 || true
+# Hand this render's raw payload to agent-usage-tracker's reader, unchanged;
+# it stores what it needs and prints the account's freshest reading from any
+# session, poller or machine (a passed reset already at 0%), so every open
+# session shows the same number. Its failures and stderr are ignored. Without
+# the tracker (or a line from it), each session shows its own reading.
+tracker_reader="$tracker_dir/src/statusline_payload_reader.py"
+tracker_line=
+if [ -x "$tracker_reader" ]; then
+    tracker_line="$(printf '%s' "$payload" | "$tracker_reader" 2>/dev/null)" || tracker_line=
 fi
-if [ -f "$tracker_quota" ]; then
-    IFS="$STATUSLINE_FIELD_SEPARATOR" read -r t_five_pct t_five_reset t_week_pct t_week_reset _ _ < "$tracker_quota"
+if [ -n "$tracker_line" ]; then
+    IFS="$STATUSLINE_FIELD_SEPARATOR" read -r t_five_pct t_five_reset t_week_pct t_week_reset _ _ <<< "$tracker_line"
     if [ -n "$t_five_pct" ]; then
         five_pct="$t_five_pct" five_reset="$t_five_reset" week_pct="$t_week_pct" week_reset="$t_week_reset"
     fi

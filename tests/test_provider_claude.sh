@@ -118,28 +118,29 @@ assert_file_missing "no quota file of our own" "$STATUSLINE_RUNTIME_DIR/state/qu
 assert_file_exists "every render touches the liveness heartbeat the tracker's pollers read" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
 
-# A stub tracker: its ingest script saves exactly what it received, and
-# writes a state file the way the real one does (the FS-separated format).
+# A stub tracker: its reader saves exactly what it received, and prints a
+# line the way the real one does (the FS-separated format).
 SEP=$'\034'
+STUB_READER=src/statusline_payload_reader.py
 stub_tracker() {
-    local dir="$1" state_line="$2"
-    mkdir -p "$dir/bin" "$dir/state/quota"
-    cat > "$dir/bin/ingest-claude-statusline.sh" <<STUB
+    local dir="$1" line="$2"
+    mkdir -p "$dir/src"
+    cat > "$dir/$STUB_READER" <<STUB
 #!/bin/bash
 cat > "$dir/received.json"
-printf '%s\n' "$state_line" > "$dir/state/quota/claude"
+printf '%s\n' "$line"
 STUB
-    chmod +x "$dir/bin/ingest-claude-statusline.sh"
+    chmod +x "$dir/$STUB_READER"
 }
 
-section "agent-usage-tracker present: the raw payload goes in, its state file is shown"
+section "agent-usage-tracker present: the raw payload goes in, its printed reading is shown"
 AGENT_USAGE_TRACKER_DIR="$TH_TMP/tracker"
 stub_tracker "$AGENT_USAGE_TRACKER_DIR" "61${SEP}1788091200${SEP}72${SEP}1788307200${SEP}statusline${SEP}1767229200"
 run_claude "$TH_TMP/payload-a.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_eq "the ingest script receives the stdin payload unchanged (bar the trailing newline)" \
+assert_eq "the reader receives the stdin payload unchanged (bar the trailing newline)" \
     "$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json")" "$(cat "$AGENT_USAGE_TRACKER_DIR/received.json")"
-assert_contains "5h comes from the tracker's file, whatever its source" "$TH_OUT" "61%"
+assert_contains "5h comes from the tracker's line, whatever its source" "$TH_OUT" "61%"
 assert_contains "7d too" "$TH_OUT" "72%"
 assert_not_contains "not this session's own 24%" "$TH_OUT" "24%"
 rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
@@ -148,14 +149,20 @@ assert_file_exists "a payload without rate_limits is forwarded too - the tracker
     "$AGENT_USAGE_TRACKER_DIR/received.json"
 assert_contains "a render with no rate_limits shows the tracker's reading" "$TH_OUT" "61%"
 
-section "a tracker file without a 5h percent falls back to this session's reading"
+section "a tracker line without a 5h percent falls back to this session's reading"
 stub_tracker "$AGENT_USAGE_TRACKER_DIR" "${SEP}${SEP}${SEP}${SEP}API${SEP}1767229200"
 run_claude "$TH_TMP/payload-b.json" "$plain_dir"
 assert_contains "this session's 25% is shown" "$TH_OUT" "25%"
 
-section "a failing ingest script never breaks the render"
-cat > "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh" <<'STUB'
+section "a reader printing nothing falls back to this session's reading"
+stub_tracker "$AGENT_USAGE_TRACKER_DIR" ""
+run_claude "$TH_TMP/payload-b.json" "$plain_dir"
+assert_contains "this session's 25% is shown" "$TH_OUT" "25%"
+
+section "a failing reader never breaks the render"
+cat > "$AGENT_USAGE_TRACKER_DIR/$STUB_READER" <<'STUB'
 #!/bin/bash
+echo "5h 99%"
 echo "boom" >&2
 exit 3
 STUB
@@ -163,11 +170,12 @@ run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_eq "still three lines" "3" "$(printf '%s\n' "$TH_OUT" | wc -l | tr -d ' ')"
 assert_not_contains "its stderr doesn't leak" "$TH_ERR" "boom"
+assert_not_contains "nor its output, when it failed" "$TH_OUT" "99%"
 
-section "a non-executable ingest script is not run"
+section "a non-executable reader is not run"
 rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
-printf '#!/bin/bash\ncat > "%s/received.json"\n' "$AGENT_USAGE_TRACKER_DIR" > "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh"
-chmod -x "$AGENT_USAGE_TRACKER_DIR/bin/ingest-claude-statusline.sh"
+printf '#!/bin/bash\ncat > "%s/received.json"\n' "$AGENT_USAGE_TRACKER_DIR" > "$AGENT_USAGE_TRACKER_DIR/$STUB_READER"
+chmod -x "$AGENT_USAGE_TRACKER_DIR/$STUB_READER"
 run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 assert_file_missing "nothing received" "$AGENT_USAGE_TRACKER_DIR/received.json"
 

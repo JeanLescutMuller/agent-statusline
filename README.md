@@ -54,9 +54,10 @@ flowchart TB
 
     subgraph tracker["~/opt/agent-usage-tracker/ — optional, separate project"]
         direction LR
-        ingest["bin/ingest-claude-statusline.sh"]
-        ccC[("state/quota/claude
-        the account's freshest reading")]
+        ingest["src/statusline_payload_reader.py
+        prints the account's freshest reading"]
+        ccC[("data/claude/account_quotas.db
+        view latest")]
         pollers["pollers (LaunchAgent)"]
     end
 
@@ -82,12 +83,11 @@ flowchart TB
 
 ## agent-usage-tracker
 
-The whole contract between the two projects is three files, each written by exactly one side. Only `providers/claude-statusline-command.sh` touches the tracker, and neither project ever writes into the other's tree.
+The whole contract between the two projects is two files, each written by exactly one side. Only `providers/claude-statusline-command.sh` touches the tracker, and neither project ever writes into the other's tree.
 
 | Interface | Written by | Read by | What |
 |---|---|---|---|
-| `~/opt/agent-usage-tracker/bin/ingest-claude-statusline.sh` | tracker (deployed) | Claude provider runs it | Every Claude render pipes its raw stdin payload into it, unchanged, before display. The statusline knows nothing about which fields the tracker keeps or where. Output and failures are ignored; skipped if the script isn't executable. |
-| `~/opt/agent-usage-tracker/state/quota/claude` | tracker (ingest and poller) | Claude provider | The account's freshest known 5h/7d reading: six `$'\034'`-separated fields, `five_pct five_reset week_pct week_reset source observed_at`. Displayed as is, whatever its source; the last two fields are not read. |
+| `~/opt/agent-usage-tracker/src/statusline_payload_reader.py` | tracker (deployed, executable) | Claude provider runs it | Every Claude render pipes its raw stdin payload into it, unchanged, before display; the statusline knows nothing about which fields the tracker keeps or where. It prints the account's freshest 5h/7d reading (any session, poller or machine; a passed reset already at 0%): one line of six `$'\034'`-separated fields, `five_pct five_reset week_pct week_reset source observed_at`, displayed as is; the last two fields are not read. Its stderr and a failed run are ignored; skipped if the file isn't executable; no line: the session's own reading. (Before 2026-10-10: `bin/ingest-claude-statusline.sh`, then the file `state/quota/claude`.) |
 | `~/opt/agent-statusline/state/heartbeat/{claude,codex}` | statusline, every render | tracker's pollers | Only the mtime matters: "a statusline is on screen right now", so the pollers poll faster. |
 
 `AGENT_USAGE_TRACKER_DIR` overrides the tracker's location (the tests point it at a stub).
@@ -146,7 +146,7 @@ Nothing is logged: a failed refresh shows as a stale or missing segment. Rerun t
 | Memory | machine | 30s | 1s |
 | Git | exact cwd | 8s | 1s |
 
-Claude quotas aren't in this table: they are read from agent-usage-tracker's state file on every render (see "agent-usage-tracker").
+Claude quotas aren't in this table: agent-usage-tracker's reader prints them on every render (see "agent-usage-tracker").
 
 ## Codex status-line patch
 

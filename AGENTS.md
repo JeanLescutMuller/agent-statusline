@@ -61,11 +61,11 @@ can deliberately leave it alone - see its own header comment).
 Both are optional: absent, the statusline still renders.
 
 - `src/statusline/cache.sh`'s `statusline_read_host` shells out to `~/opt/bootstrap-home/bin/get_host_color` for the deterministic per-host color (falls back to a default). Owned by `bootstrap-home`.
-- **agent-usage-tracker** (`~/dev/agent-usage-tracker`, split out of this repo on 2026-09-30 - git history before that is here, up to `d744951`). The contract is three files, specified in README.md's "agent-usage-tracker" section: the Claude provider pipes its raw stdin payload into the tracker's `bin/ingest-claude-statusline.sh` and reads back its `state/quota/claude`; the tracker's pollers read this repo's `state/heartbeat/*` mtimes. Rules that keep it clean:
+- **agent-usage-tracker** (`~/dev/agent-usage-tracker`, split out of this repo on 2026-09-30 - git history before that is here, up to `d744951`). The contract is three files, specified in README.md's "agent-usage-tracker" section: the Claude provider pipes its raw stdin payload into the tracker's `src/statusline_payload_reader.py` (executable) and shows the line it prints; the tracker's pollers read this repo's `state/heartbeat/*` mtimes (since 2026-10-10; before, a `bin/ingest-claude-statusline.sh` and a `state/quota/claude` file). Rules that keep it clean:
   - Only `providers/claude-statusline-command.sh` references the tracker (enforced by `tests/test_repo_hygiene.sh`), and neither project writes into the other's tree.
   - Forward the payload unchanged - never pick fields for the tracker here, so what it records can change without touching this repo.
-  - Never let the tracker break a render: its output and exit status are ignored. Its `state/quota/claude` is the only Claude quota file (this repo keeps no copy) and is displayed as is; without it, each session shows its own stdin reading, or `–`.
-  - The state file's six-field format and the heartbeat path are a shared format; changing either is a change in both repos.
+  - Never let the tracker break a render: its stderr and a failed run are ignored. Its printed line is the only Claude quota this repo shows besides the session's own (no copy kept here) and is displayed as is; without it, each session shows its own stdin reading, or `–`.
+  - The line's six-field format and the heartbeat path are a shared format; changing either is a change in both repos.
 
 ## Tests
 

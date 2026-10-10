@@ -46,7 +46,7 @@ assert_eq "no other top-level script references codex-patch/" "" "$other_crosser
 
 section "boundary with agent-usage-tracker: only the Claude provider touches it"
 # README.md's "agent-usage-tracker": the Claude provider pipes its payload
-# into the tracker's ingest script and reads its state file; nothing else
+# into the tracker's reader and shows the line it prints; nothing else
 # here knows the tracker exists.
 # Comment lines are ignored.
 tracker_refs="$(grep -rn 'agent-usage-tracker\|AGENT_USAGE_TRACKER' "$REPO_ROOT/src" "$REPO_ROOT/providers" \
