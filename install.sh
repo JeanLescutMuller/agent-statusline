@@ -58,6 +58,24 @@ _deploy "$SCRIPT_DIR/providers/codex-statusline-command.sh" "$RUNTIME/providers/
 _link "$RUNTIME/providers/claude-statusline-command.sh" "$HOME/.claude/statusline-command.sh"
 _link "$RUNTIME/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
 
+step "skills"
+# Each skills/<name>/ is linked into this clone (~/dev/agent-statusline), never
+# copied. An old copy at the link path is replaced only if identical (ignoring *.bak).
+for src in "$SCRIPT_DIR"/skills/*/; do
+    src="${src%/}"
+    for home in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
+        link="$home/$(basename "$src")"
+        if [ -d "$link" ] && [ ! -L "$link" ]; then
+            if ! diff -rq -x '*.bak' "$link" "$src" >/dev/null 2>&1; then
+                fail "$link is a real folder that differs from $src - kept, not linked"
+                continue
+            fi
+            rm -r "$link"
+        fi
+        _link "$src" "$link"
+    done
+done
+
 step "codex status-line patch"
 if command -v codex >/dev/null 2>&1; then
     if bash "$SCRIPT_DIR/codex-patch/install-codex-statusline-patch.sh"; then

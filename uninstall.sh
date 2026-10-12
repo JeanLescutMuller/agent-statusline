@@ -1,6 +1,6 @@
 #!/bin/bash
-# Removes everything install.sh deploys: the provider symlinks in ~/.claude
-# and ~/.codex, and the code/cache/log/lock state under ~/opt/agent-statusline.
+# Removes everything install.sh deploys: the skill links, the provider symlinks
+# in ~/.claude and ~/.codex, and the code/cache/log/lock state under ~/opt/agent-statusline.
 # Run it before re-installing across a layout change (install.sh carries no
 # migration logic). Never touches agent-usage-tracker or ~/.codex/config.toml
 # (a missing script just leaves Codex's status-line item empty).
@@ -18,6 +18,17 @@ RUNTIME="$HOME/opt/agent-statusline"
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN} agent-statusline uninstall${NC}"
 echo -e "${GREEN}========================================${NC}"
+
+step "skills"
+for src in "$SCRIPT_DIR"/skills/*/; do
+    src="${src%/}"
+    for link in "$HOME/.claude/skills/$(basename "$src")" "$HOME/.agents/skills/$(basename "$src")"; do
+        if [ -L "$link" ] && [ "$(readlink "$link")" = "$src" ]; then
+            rm "$link"
+            installed "removed $link"
+        fi
+    done
+done
 
 step "provider adapters"
 for target in "$HOME/.claude/statusline-command.sh" "$HOME/.codex/statusline-command.sh"; do
