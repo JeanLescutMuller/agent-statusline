@@ -20,15 +20,21 @@ echo -e "${GREEN} agent-statusline uninstall${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 step "skills"
-for src in "$SCRIPT_DIR"/skills/*/; do
-    src="${src%/}"
-    for link in "$HOME/.claude/skills/$(basename "$src")" "$HOME/.agents/skills/$(basename "$src")"; do
-        if [ -L "$link" ] && [ "$(readlink "$link")" = "$src" ]; then
+OPT_SKILLS="$HOME/opt/agent-statusline/skills"
+for dst in "$OPT_SKILLS"/*/; do
+    [ -d "$dst" ] || continue
+    dst="${dst%/}"; name=$(basename "$dst")
+    for link in "$HOME/.claude/skills/$name" "$HOME/.agents/skills/$name"; do
+        if [ -L "$link" ] && [ "$(readlink "$link")" = "$dst" ]; then
             rm "$link"
             installed "removed $link"
         fi
     done
 done
+if [ -d "$OPT_SKILLS" ]; then
+    chmod -R u+w "$OPT_SKILLS" && rm -r "$OPT_SKILLS"
+    installed "removed $OPT_SKILLS"
+fi
 
 step "provider adapters"
 for target in "$HOME/.claude/statusline-command.sh" "$HOME/.codex/statusline-command.sh"; do

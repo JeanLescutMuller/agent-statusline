@@ -161,7 +161,7 @@ Verbose clone/patch/compiler output is captured in `~/opt/agent-statusline/codex
 
 `install.sh` then checks, without editing, that `~/.codex/config.toml`'s `[tui]` has `status_line = ["custom"]` and `status_line_use_colors = true`, and prints those two lines when it doesn't. The patched binary reads `CODEX_STATUS_LINE_COMMAND` or falls back to `~/.codex/statusline-command.sh`.
 
-The skill `skills/patch-statusline/` tells an agent to re-run this patch after a Codex update; `install.sh` links it from `~/.claude/skills/` and `~/.agents/skills/` into this clone (keep it in `~/dev/agent-statusline`), `uninstall.sh` removes the links.
+The skill `skills/patch-statusline/` tells an agent to re-run this patch after a Codex update; `install.sh` copies it read-only to `~/opt/agent-statusline/skills/`, linked from `~/.claude/skills/` and `~/.agents/skills/` (edit it here, then re-run `install.sh`); `uninstall.sh` removes the links and the copy.
 
 ## Source files
 

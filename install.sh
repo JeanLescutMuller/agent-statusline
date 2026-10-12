@@ -59,12 +59,26 @@ _link "$RUNTIME/providers/claude-statusline-command.sh" "$HOME/.claude/statuslin
 _link "$RUNTIME/providers/codex-statusline-command.sh" "$HOME/.codex/statusline-command.sh"
 
 step "skills"
-# Each skills/<name>/ is linked into this clone (~/dev/agent-statusline), never
-# copied. An old copy at the link path is replaced only if identical (ignoring *.bak).
+# Each skills/<name>/ is copied read-only to ~/opt/agent-statusline/skills/ and
+# linked from ~/.claude/skills/ and ~/.agents/skills/: edit it here, then re-run
+# install.sh. A real folder at the link path is replaced only if identical (ignoring *.bak).
+OPT_SKILLS="$HOME/opt/agent-statusline/skills"
+mkdir -p "$OPT_SKILLS"
+for dst in "$OPT_SKILLS"/*/; do      # a skill gone from the repo: its link and copy go too
+    [ -d "$dst" ] || continue
+    dst="${dst%/}"; name=$(basename "$dst")
+    [ -d "$SCRIPT_DIR/skills/$name" ] && continue
+    for link in "$HOME/.claude/skills/$name" "$HOME/.agents/skills/$name"; do
+        [ -L "$link" ] && [ "$(readlink "$link")" = "$dst" ] && rm "$link"
+    done
+    chmod -R u+w "$dst" && rm -r "$dst" && installed "removed old skill $name"
+done
 for src in "$SCRIPT_DIR"/skills/*/; do
-    src="${src%/}"
+    src="${src%/}"; name=$(basename "$src"); dst="$OPT_SKILLS/$name"
+    [ -d "$dst" ] && chmod -R u+w "$dst" && rm -r "$dst"
+    cp -R "$src" "$dst" && chmod -R a-w "$dst"
     for home in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
-        link="$home/$(basename "$src")"
+        link="$home/$name"
         if [ -d "$link" ] && [ ! -L "$link" ]; then
             if ! diff -rq -x '*.bak' "$link" "$src" >/dev/null 2>&1; then
                 fail "$link is a real folder that differs from $src - kept, not linked"
@@ -72,7 +86,9 @@ for src in "$SCRIPT_DIR"/skills/*/; do
             fi
             rm -r "$link"
         fi
-        _link "$src" "$link"
+        mkdir -p "$home"
+        ln -sfn "$dst" "$link"
+        installed "$link -> $dst"
     done
 done
 
