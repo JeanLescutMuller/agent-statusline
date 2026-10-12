@@ -118,7 +118,7 @@ source "$REPO_ROOT/src/statusline/cache.sh"
 statusline_cache_init
 statusline_read_host
 want=$(if [ "$(uname)" = Darwin ]; then scutil --get HostName; else cat /etc/hostname; fi 2>/dev/null); want=${want%%.*}
-assert_eq "hostname: the machine's name (\"Machine name\" in ~/AGENTS.md)" "$want" "$STATUSLINE_HOSTNAME"
+assert_eq "hostname: the machine's name (skill \"machine-name\")" "$want" "$STATUSLINE_HOSTNAME"
 JR_MACHINE_NAME=box.example statusline_read_host
 assert_eq "hostname: JR_MACHINE_NAME first, cut at the first dot" "box" "$STATUSLINE_HOSTNAME"
 JR_MACHINE_NAME='a b' statusline_read_host

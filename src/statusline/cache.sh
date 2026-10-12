@@ -119,7 +119,7 @@ statusline_advance_spin_index() {
 # get_host_color, default 45).
 statusline_read_host() {
     local color_file m
-    # This machine's name: "Machine name" in ~/AGENTS.md (copy it identically)
+    # This machine's name: skill "machine-name" (copy it identically)
     m=${JR_MACHINE_NAME:-$(if [ "$(uname)" = Darwin ]; then scutil --get HostName; else cat /etc/hostname; fi 2>/dev/null)} || :
     m=${m%%.*}; [[ $m =~ ^[A-Za-z0-9-]+$ ]] || m='?'
     STATUSLINE_HOSTNAME=$m
