@@ -7,7 +7,7 @@
 # patch and checks ~/.codex/config.toml's [tui] status-line keys.
 #
 # Optional, not deployed here: agent-usage-tracker (README.md's
-# "agent-usage-tracker") and bootstrap-home's get_host_color (falls back to a
+# "agent-usage-tracker") and my-setup's get_host_color (falls back to a
 # default color).
 set -uo pipefail
 

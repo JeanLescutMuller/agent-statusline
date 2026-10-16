@@ -60,7 +60,7 @@ can deliberately leave it alone - see its own header comment).
 
 Both are optional: absent, the statusline still renders.
 
-- `src/statusline/cache.sh`'s `statusline_read_host` shells out to `~/opt/bootstrap-home/bin/get_host_color` for the deterministic per-host color (falls back to a default). Owned by `bootstrap-home`.
+- `src/statusline/cache.sh`'s `statusline_read_host` shells out to `~/opt/my-setup/bin/get_host_color` for the deterministic per-host color (falls back to a default). Owned by `my-setup`.
 - **agent-usage-tracker** (`~/dev/agent-usage-tracker`, split out of this repo on 2026-09-30 - git history before that is here, up to `d744951`). The contract is three files, specified in README.md's "agent-usage-tracker" section: the Claude provider pipes its raw stdin payload into the tracker's `src/statusline_payload_reader.py` (executable) and shows the line it prints; the tracker's pollers read this repo's `state/heartbeat/*` mtimes (since 2026-10-10; before, a `bin/ingest-claude-statusline.sh` and a `state/quota/claude` file). Rules that keep it clean:
   - Only `providers/claude-statusline-command.sh` references the tracker (enforced by `tests/test_repo_hygiene.sh`), and neither project writes into the other's tree.
   - Forward the payload unchanged - never pick fields for the tracker here, so what it records can change without touching this repo.

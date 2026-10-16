@@ -115,7 +115,7 @@ statusline_advance_spin_index() {
 }
 
 # Sets STATUSLINE_HOSTNAME (the machine's name, "?" when it has none) and
-# STATUSLINE_HOST_COLOR (cached per name, from bootstrap-home's
+# STATUSLINE_HOST_COLOR (cached per name, from my-setup's
 # get_host_color, default 45).
 statusline_read_host() {
     local color_file m
@@ -128,7 +128,7 @@ statusline_read_host() {
         IFS= read -r STATUSLINE_HOST_COLOR < "$color_file"
         return
     fi
-    STATUSLINE_HOST_COLOR="$("$HOME/opt/bootstrap-home/bin/get_host_color" \
+    STATUSLINE_HOST_COLOR="$("$HOME/opt/my-setup/bin/get_host_color" \
         "$STATUSLINE_HOSTNAME" 2>/dev/null || printf '45')"
     mkdir -p "${color_file%/*}"
     printf '%s\n' "$STATUSLINE_HOST_COLOR" > "$color_file"

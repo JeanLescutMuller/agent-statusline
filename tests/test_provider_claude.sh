@@ -4,7 +4,7 @@
 # point at an isolated temp runtime, and a captured payload is piped in.
 #
 # HOME is also overridden per call: statusline_read_static falls back to
-# $HOME/opt/bootstrap-home/bin/get_host_color - pointing HOME at an empty
+# $HOME/opt/my-setup/bin/get_host_color - pointing HOME at an empty
 # temp dir makes that miss deterministic instead of quietly depending on
 # what's installed on the machine running the suite.
 #
