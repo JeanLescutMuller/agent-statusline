@@ -83,14 +83,12 @@ index 4b601e5..536c6ce 100644
      // Cached backend-estimated cost and bounded refresh state for the current thread.
      thread_usage: thread_usage::ThreadUsageState,
      // Current thread-goal status shown in the status line when plan mode is inactive.
-@@ -1220,6 +1224,7 @@ impl ChatWidget {
+@@ -1220,4 +1224,5 @@ impl ChatWidget {
              self.refresh_terminal_title();
          }
          self.refresh_status_line_if_workspace_headline_due();
 +        self.refresh_status_line_if_command_due();
          self.refresh_thread_usage_if_settlement_due();
-     }
- 
 diff --git a/codex-rs/tui/src/chatwidget/constructor.rs b/codex-rs/tui/src/chatwidget/constructor.rs
 index a1079ac..69eaeae 100644
 --- a/codex-rs/tui/src/chatwidget/constructor.rs
