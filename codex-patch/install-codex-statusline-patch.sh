@@ -65,11 +65,14 @@ git -C "$source_dir" apply --check "$patch_file" >>"$BUILD_LOG" 2>&1 \
 git -C "$source_dir" apply "$patch_file" >>"$BUILD_LOG" 2>&1 \
     || die "patch application failed"
 
-# Rust 1.98 needs a larger macro recursion allowance for this pinned release.
+# Rust 1.98 needs a larger macro recursion allowance for these pinned releases.
 # This is build compatibility only; it is deliberately outside the functional patch.
 cli_main="$source_dir/codex-rs/cli/src/main.rs"
 { printf '#![recursion_limit = "256"]\n'; cat "$cli_main"; } > "$cli_main.tmp"
 mv "$cli_main.tmp" "$cli_main"
+chatgpt_lib="$source_dir/codex-rs/chatgpt/src/lib.rs"
+{ printf '#![recursion_limit = "256"]\n'; cat "$chatgpt_lib"; } > "$chatgpt_lib.tmp"
+mv "$chatgpt_lib.tmp" "$chatgpt_lib"
 
 code_mode_host_source="$(dirname "$CODEX_BIN")/codex-code-mode-host"
 [ -x "$code_mode_host_source" ] \
