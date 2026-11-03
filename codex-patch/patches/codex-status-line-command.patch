@@ -3,16 +3,14 @@ diff --git a/codex-rs/tui/src/bottom_pane/status_line_setup.rs b/codex-rs/tui/sr
 index a5f728e..ba2f582 100644
 --- a/codex-rs/tui/src/bottom_pane/status_line_setup.rs
 +++ b/codex-rs/tui/src/bottom_pane/status_line_setup.rs
-@@ -152,6 +152,9 @@ pub(crate) enum StatusLineItem {
+@@ -151,4 +151,7 @@ pub(crate) enum StatusLineItem {
+     WorkspaceHeadline,
  
-     /// Latest checklist task progress from `update_plan` (if available).
-     TaskProgress,
-+
 +    /// First stdout line from ~/.codex/statusline-command.sh.
 +    Custom,
- }
- 
- impl StatusLineItem {
++
+     /// Latest checklist task progress from `update_plan` (if available).
+     TaskProgress,
 @@ -211,6 +214,7 @@ impl StatusLineItem {
              StatusLineItem::TaskProgress => {
                  "Latest task progress from update_plan (omitted until available)"

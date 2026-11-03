@@ -152,7 +152,7 @@ Claude quotas aren't in this table: agent-usage-tracker's reader prints them on 
 
 Codex's TUI does not natively support a `status_line_command` the way this project needs, on the supported pinned version. Everything for this lives in `codex-patch/`, self-contained and separate from the statusline architecture above. `install.sh` calls `codex-patch/install-codex-statusline-patch.sh`, which:
 
-- Clones `openai/codex` at the exact release commit allowlisted in `codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.154.0, 0.160.1 and 0.164.0; unknown versions are left unpatched).
+- Clones `openai/codex` at the exact release commit allowlisted in `codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.154.0, 0.160.1, 0.164.0 and 0.166.0; unknown versions are left unpatched).
 - Checks and applies the shared `codex-patch/patches/codex-status-line-command.patch`; almost all custom Rust lives in one isolated module to keep upstream integration points small.
 - Builds a release binary with Cargo, pairs it with the matching official `codex-code-mode-host`, and deploys both as a `~/.codex/packages/standalone/releases/...` release, symlinked from `current`.
 - Is idempotent: skips the clone/build entirely once the deployed binary's marker matches the pinned commit + patch hash.

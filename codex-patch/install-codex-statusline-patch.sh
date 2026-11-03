@@ -83,7 +83,9 @@ printf 'Building quietly (details: %s)...\n' "$BUILD_LOG"
     cd "$source_dir/codex-rs"
     # Use Cargo's normal parallelism for fresh-version builds. Callers can set
     # CARGO_BUILD_JOBS when they deliberately need a lower resource ceiling.
-    CARGO_PROFILE_RELEASE_LTO=false cargo build --release -p codex-cli
+    # Fetch git dependencies with the git CLI: from 0.166.0 a v8 dependency pulls Chromium
+    # submodules, and Cargo's built-in fetcher lost the connection on them 4 times (2026-11-03).
+    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_LTO=false cargo build --release -p codex-cli
 ) >>"$BUILD_LOG" 2>&1 || die "compiler failed"
 
 built="$source_dir/codex-rs/target/release/codex"

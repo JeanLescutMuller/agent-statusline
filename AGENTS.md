@@ -40,7 +40,7 @@ final result print to the terminal. Never drive this build by hand-running
 `cargo`/`git` steps or by polling compiler output through the model.
 
 Supported Codex versions and their exact upstream release commits live in
-`codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.154.0, 0.160.1 and 0.164.0). The
+`codex-patch/supported-versions.tsv` (currently 0.150.1 through 0.154.0, 0.160.1, 0.164.0 and 0.166.0). The
 functional change is one shared patch, with almost all custom Rust isolated in
 its own module. Before adding a release to the allowlist, check that the shared
 patch applies cleanly to that exact tag and compile it; only re-derive the patch
