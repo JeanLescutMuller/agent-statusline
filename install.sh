@@ -86,6 +86,10 @@ for src in "$SCRIPT_DIR"/skills/*/; do
             fi
             rm -r "$link"
         fi
+        if [ -L "$link" ] && [ "$(readlink "$link")" = "$dst" ]; then
+            ok "$link"
+            continue
+        fi
         mkdir -p "$home"
         ln -sfn "$dst" "$link"
         installed "$link -> $dst"
