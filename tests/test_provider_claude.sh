@@ -8,9 +8,10 @@
 # temp dir makes that miss deterministic instead of quietly depending on
 # what's installed on the machine running the suite.
 #
-# agent-usage-tracker is never the real one: AGENT_USAGE_TRACKER_DIR points
-# at an empty temp dir (tracker absent) or at a stub that records what it
-# was sent - this suite tests this repo's side of the contract only.
+# agent-tracker is never the real one: AGENT_TRACKER_HOME points at an empty
+# temp dir (tracker absent) or at one holding a hand-written
+# data/claude/quota_latest.json - this suite tests this repo's side of the
+# contract only.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -20,7 +21,7 @@ FIXTURES="$TESTS_DIR/fixtures"
 th_tmp_runtime
 TH_HOME="$(mktemp -d "$TH_TMP/home.XXXXXX")"
 TH_HOME="$(cd "$TH_HOME" && pwd -P)"
-export AGENT_USAGE_TRACKER_DIR="$TH_TMP/no-tracker"
+export AGENT_TRACKER_HOME="$TH_TMP/no-tracker"
 
 run_claude() {
     local payload_file="$1" cwd="$2" err_file
@@ -99,7 +100,7 @@ assert_contains "5h shows 0%" "$TH_OUT" "5h"
 assert_match "5h is 0%" "$(printf '%s\n' "$TH_OUT" | sed -n 3p)" '5h.*\] .*0%'
 assert_contains "7d from stdin" "$TH_OUT" "16%"
 
-section "agent-usage-tracker absent: each session shows its own reading"
+section "agent-tracker absent: each session shows its own reading"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime-solo.XXXXXX")"
 payload_for() {
     jq --argjson p "$1" '. + {rate_limits: (.rate_limits + {five_hour: {used_percentage: $p, resets_at: 1788091200}})}' \
@@ -113,70 +114,64 @@ run_claude "$TH_TMP/payload-b.json" "$plain_dir"
 assert_contains "session B shows its own 25%" "$TH_OUT" "25%"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_match "session C (no reading) shows a dash" "$(printf '%s\n' "$TH_OUT" | sed -n 3p)" '5h.*–'
-assert_file_missing "nothing is created under the tracker's directory" "$AGENT_USAGE_TRACKER_DIR"
+assert_file_missing "nothing is created under the tracker's directory" "$AGENT_TRACKER_HOME"
 assert_file_missing "no quota file of our own" "$STATUSLINE_RUNTIME_DIR/state/quota"
-assert_file_exists "every render touches the liveness heartbeat the tracker's pollers read" \
-    "$STATUSLINE_RUNTIME_DIR/state/heartbeat/claude"
+assert_file_missing "no heartbeat any more (agent-tracker's last_seen.json replaces it)" \
+    "$STATUSLINE_RUNTIME_DIR/state/heartbeat"
 
-# A stub tracker: its reader saves exactly what it received, and prints a
-# line the way the real one does (the FS-separated format).
-SEP=$'\034'
-STUB_READER=src/statusline_payload_reader.py
-stub_tracker() {
-    local dir="$1" line="$2"
-    mkdir -p "$dir/src"
-    cat > "$dir/$STUB_READER" <<STUB
-#!/bin/bash
-cat > "$dir/received.json"
-printf '%s\n' "$line"
-STUB
-    chmod +x "$dir/$STUB_READER"
+# A hand-written quota_latest.json, in agent-tracker's format
+# (IMPLEMENTATION.md §4: the shape of stdin's rate_limits, plus ts/dt/source).
+future=$(( $(date '+%s') + 3 * 3600 ))
+future_week=$(( $(date '+%s') + 3 * 86400 ))
+past=$(( $(date '+%s') - 60 ))
+quota_file() {
+    mkdir -p "$AGENT_TRACKER_HOME/data/claude"
+    printf '%s\n' "$1" > "$AGENT_TRACKER_HOME/data/claude/quota_latest.json"
 }
+line3_of() { printf '%s\n' "$TH_OUT" | sed -n 3p; }
 
-section "agent-usage-tracker present: the raw payload goes in, its printed reading is shown"
-AGENT_USAGE_TRACKER_DIR="$TH_TMP/tracker"
-stub_tracker "$AGENT_USAGE_TRACKER_DIR" "61${SEP}1788091200${SEP}72${SEP}1788307200${SEP}statusline${SEP}1767229200"
+section "agent-tracker present: its quota_latest.json is shown, not stdin's reading"
+AGENT_TRACKER_HOME="$TH_TMP/tracker"
+quota_file "{\"ts\":1794051573,\"dt\":\"2026-11-07T11:39:33Z\",\"source\":\"poller\",\"machine\":\"m\",
+  \"five_hour\":{\"used_percentage\":61,\"resets_at\":$future},\"seven_day\":{\"used_percentage\":72,\"resets_at\":$future_week}}"
+before="$(cat "$AGENT_TRACKER_HOME/data/claude/quota_latest.json")"
 run_claude "$TH_TMP/payload-a.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_eq "the reader receives the stdin payload unchanged (bar the trailing newline)" \
-    "$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json")" "$(cat "$AGENT_USAGE_TRACKER_DIR/received.json")"
-assert_contains "5h comes from the tracker's line, whatever its source" "$TH_OUT" "61%"
+assert_contains "5h comes from the file" "$TH_OUT" "61%"
 assert_contains "7d too" "$TH_OUT" "72%"
 assert_not_contains "not this session's own 24%" "$TH_OUT" "24%"
-rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
+assert_contains "resets come from the file too (5h in 3h)" "$TH_OUT" "3h"
+assert_eq "the file is only read, never written" "$before" "$(cat "$AGENT_TRACKER_HOME/data/claude/quota_latest.json")"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
-assert_file_exists "a payload without rate_limits is forwarded too - the tracker decides" \
-    "$AGENT_USAGE_TRACKER_DIR/received.json"
-assert_contains "a render with no rate_limits shows the tracker's reading" "$TH_OUT" "61%"
+assert_contains "a render with no rate_limits shows the file's reading" "$TH_OUT" "61%"
 
-section "a tracker line without a 5h percent falls back to this session's reading"
-stub_tracker "$AGENT_USAGE_TRACKER_DIR" "${SEP}${SEP}${SEP}${SEP}API${SEP}1767229200"
+section "rule 8: a window whose resets_at has passed shows 0%"
+quota_file "{\"ts\":1,\"five_hour\":{\"used_percentage\":61,\"resets_at\":$past},\"seven_day\":{\"used_percentage\":72,\"resets_at\":$future_week}}"
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_match "5h is 0%" "$(line3_of)" '5h.*\] .*0%'
+assert_not_contains "not the stale 61%" "$TH_OUT" "61%"
+assert_contains "7d (not passed) keeps its 72%" "$TH_OUT" "72%"
+assert_contains "the passed 5h reset shows as now" "$TH_OUT" "now"
+
+section "a window missing from the file is at 0%, as on stdin"
+quota_file "{\"ts\":1,\"seven_day\":{\"used_percentage\":16,\"resets_at\":$future_week}}"
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_match "5h is 0%" "$(line3_of)" '5h.*\] .*0%'
+assert_contains "7d from the file" "$TH_OUT" "16%"
+assert_not_contains "not this session's own 24%" "$TH_OUT" "24%"
+
+section "an unreadable or broken file falls back to this session's reading"
+quota_file 'not json {'
 run_claude "$TH_TMP/payload-b.json" "$plain_dir"
-assert_contains "this session's 25% is shown" "$TH_OUT" "25%"
-
-section "a reader printing nothing falls back to this session's reading"
-stub_tracker "$AGENT_USAGE_TRACKER_DIR" ""
-run_claude "$TH_TMP/payload-b.json" "$plain_dir"
-assert_contains "this session's 25% is shown" "$TH_OUT" "25%"
-
-section "a failing reader never breaks the render"
-cat > "$AGENT_USAGE_TRACKER_DIR/$STUB_READER" <<'STUB'
-#!/bin/bash
-echo "5h 99%"
-echo "boom" >&2
-exit 3
-STUB
-run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_eq "still three lines" "3" "$(printf '%s\n' "$TH_OUT" | wc -l | tr -d ' ')"
-assert_not_contains "its stderr doesn't leak" "$TH_ERR" "boom"
-assert_not_contains "nor its output, when it failed" "$TH_OUT" "99%"
-
-section "a non-executable reader is not run"
-rm -f "$AGENT_USAGE_TRACKER_DIR/received.json"
-printf '#!/bin/bash\ncat > "%s/received.json"\n' "$AGENT_USAGE_TRACKER_DIR" > "$AGENT_USAGE_TRACKER_DIR/$STUB_READER"
-chmod -x "$AGENT_USAGE_TRACKER_DIR/$STUB_READER"
-run_claude "$FIXTURES/claude-payload.json" "$plain_dir"
-assert_file_missing "nothing received" "$AGENT_USAGE_TRACKER_DIR/received.json"
+assert_contains "this session's 25% is shown" "$TH_OUT" "25%"
+assert_eq "no jq error leaks" "" "$TH_ERR"
+quota_file '[1,2]'
+run_claude "$TH_TMP/payload-b.json" "$plain_dir"
+assert_contains "a non-object file: this session's 25%" "$TH_OUT" "25%"
+quota_file ''
+run_claude "$TH_TMP/payload-b.json" "$plain_dir"
+assert_contains "an empty file: this session's 25%" "$TH_OUT" "25%"
 
 harness_summary

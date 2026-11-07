@@ -2,7 +2,7 @@
 # Removes everything install.sh deploys: the skill links, the provider symlinks
 # in ~/.claude and ~/.codex, and the code/cache/log/lock state under ~/opt/agent-statusline.
 # Run it before re-installing across a layout change (install.sh carries no
-# migration logic). Never touches agent-usage-tracker or ~/.codex/config.toml
+# migration logic). Never touches agent-tracker or ~/.codex/config.toml
 # (a missing script just leaves Codex's status-line item empty).
 #
 # Preserves codex-patch/ (build.log and marker; the patched binary lives

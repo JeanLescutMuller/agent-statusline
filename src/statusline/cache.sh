@@ -87,15 +87,6 @@ statusline_refresh_if_stale() {
     statusline_lock_release
 }
 
-# Liveness signal read by agent-usage-tracker's pollers for their
-# watched-vs-idle cadence (see README.md's "agent-usage-tracker") - content
-# doesn't matter, only mtime, so a plain overwrite is fine, no lock needed.
-statusline_touch_heartbeat() {
-    local provider="$1" now="$2"
-    mkdir -p "$STATUSLINE_STATE_DIR/heartbeat"
-    printf '%s\n' "$now" > "$STATUSLINE_STATE_DIR/heartbeat/$provider" 2>/dev/null || true
-}
-
 # statusline_advance_spin_index - a persisted counter, +1 mod 10 per render,
 # so the spinner moves every render: `now % 10` freezes when refreshInterval
 # is 10. No lock: a lost increment is invisible.

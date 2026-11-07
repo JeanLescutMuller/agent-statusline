@@ -36,7 +36,7 @@ assert_eq "Codex adapter is a symlink too" \
     "$th_home/opt/agent-statusline/providers/codex-statusline-command.sh" "$(readlink "$th_home/.codex/statusline-command.sh")"
 diff -q "$REPO_ROOT/providers/claude-statusline-command.sh" "$th_home/.claude/statusline-command.sh" >/dev/null
 assert_status "the symlink resolves to the current provider" 0 $?
-assert_file_missing "nothing of agent-usage-tracker's is deployed" "$th_home/opt/agent-usage-tracker"
+assert_file_missing "nothing of agent-tracker's is deployed" "$th_home/opt/agent-tracker"
 assert_file_missing "no LaunchAgent at all" "$th_home/Library/LaunchAgents"
 assert_file_missing "~/.claude/settings.json is not touched" "$th_home/.claude/settings.json"
 diff -q "$REPO_ROOT/src/statusline/cache.sh" "$th_home/opt/agent-statusline/src/statusline/cache.sh" >/dev/null

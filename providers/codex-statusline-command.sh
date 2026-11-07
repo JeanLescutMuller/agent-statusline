@@ -46,8 +46,6 @@ week_reset="${values[11]:-}"
 now="${values[12]:-0}"
 page=$((now / 4 % 3 + 1))
 
-statusline_touch_heartbeat codex "$now"
-
 model_display="$model"
 [ -n "$reasoning" ] && model_display="$model ($reasoning)"
 
