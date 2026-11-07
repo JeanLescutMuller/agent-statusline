@@ -51,11 +51,10 @@ line_count="$(printf '%s\n' "$TH_OUT" | wc -l | tr -d ' ')"
 assert_eq "renders exactly one line (one carousel page)" "1" "$line_count"
 assert_match "output is page 1, 2, or 3's known shape" "$TH_OUT" '🤖|🆔|💬'
 
-section "heartbeat"
+section "no heartbeat any more (agent-tracker's last_seen.json replaces it)"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime2.XXXXXX")"
 run_codex "$FIXTURES/codex-payload.json" "$plain_dir"
-assert_file_exists "every render touches the liveness heartbeat agent-usage-tracker's poll_codex.py reads" \
-    "$STATUSLINE_RUNTIME_DIR/state/heartbeat/codex"
+assert_file_missing "no heartbeat folder is written" "$STATUSLINE_RUNTIME_DIR/state/heartbeat"
 
 section "carousel: page 1 (model/host/cwd)"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime3.XXXXXX")"
@@ -93,7 +92,6 @@ section "minimal payload (no thread_title, no rate_limits)"
 STATUSLINE_RUNTIME_DIR="$(mktemp -d "$TH_TMP/runtime4.XXXXXX")"
 run_codex "$FIXTURES/codex-payload-full-ask.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
-assert_file_exists "heartbeat is still touched even with no rate_limits in the payload" \
-    "$STATUSLINE_RUNTIME_DIR/state/heartbeat/codex"
+assert_eq "renders one line even with no rate_limits in the payload" "1" "$(printf '%s\n' "$TH_OUT" | wc -l | tr -d ' ')"
 
 harness_summary

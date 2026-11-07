@@ -7,14 +7,12 @@ source "$lib_dir/cache.sh"
 source "$lib_dir/format.sh"
 statusline_cache_init
 
-# Optional: the separate agent-usage-tracker project. See README.md's
-# "agent-usage-tracker" for the whole contract - this file is the only
-# place that touches it.
-tracker_dir="${AGENT_USAGE_TRACKER_DIR:-$HOME/opt/agent-usage-tracker}"
+# Optional: the separate agent-tracker project. See README.md's
+# "agent-tracker" for the whole contract (one file, read here, never
+# written) - this file is the only place that touches it.
+quota_file="${AGENT_TRACKER_HOME:-$HOME/opt/agent-tracker}/data/claude/quota_latest.json"
 
 now="$(date '+%s')"
-
-statusline_touch_heartbeat claude "$now"
 
 payload="$(cat)"
 
@@ -51,21 +49,26 @@ five_reset="${values[6]:-}"
 week_pct="${values[7]:-}"
 week_reset="${values[8]:-}"
 
-# Hand this render's raw payload to agent-usage-tracker's reader, unchanged;
-# it stores what it needs and prints the account's freshest reading from any
-# session, poller or machine (a passed reset already at 0%), so every open
-# session shows the same number. Its failures and stderr are ignored. Without
-# the tracker (or a line from it), each session shows its own reading.
-tracker_reader="$tracker_dir/src/statusline_payload_reader.py"
-tracker_line=
-if [ -x "$tracker_reader" ]; then
-    tracker_line="$(printf '%s' "$payload" | "$tracker_reader" 2>/dev/null)" || tracker_line=
+# The account's freshest reading (any session, poller or machine), kept by
+# agent-tracker, so every open session shows the same number. A window whose
+# resets_at has passed is at 0% (agent-tracker's FOR_READERS.md rule 8); a
+# missing window is at 0%, as on stdin. Without the file (or a readable one),
+# each session shows its own reading.
+quota_line=
+if [ -r "$quota_file" ]; then
+    quota_line="$(jq -r --argjson now "$now" '
+        def window($w):
+            if ($w | type) != "object" then ["0", ""]
+            else [
+                (if ($w.resets_at | type) == "number" and $w.resets_at <= $now then "0"
+                 else ($w.used_percentage // 0) | round | tostring end),
+                (if $w.resets_at == null then "" else $w.resets_at | tostring end)
+            ] end;
+        if type == "object" then (window(.five_hour) + window(.seven_day)) | join("\u001c") else empty end
+    ' "$quota_file" 2>/dev/null)" || quota_line=
 fi
-if [ -n "$tracker_line" ]; then
-    IFS="$STATUSLINE_FIELD_SEPARATOR" read -r t_five_pct t_five_reset t_week_pct t_week_reset _ _ <<< "$tracker_line"
-    if [ -n "$t_five_pct" ]; then
-        five_pct="$t_five_pct" five_reset="$t_five_reset" week_pct="$t_week_pct" week_reset="$t_week_reset"
-    fi
+if [ -n "$quota_line" ]; then
+    IFS="$STATUSLINE_FIELD_SEPARATOR" read -r five_pct five_reset week_pct week_reset <<< "$quota_line"
 fi
 
 model_display="$model"

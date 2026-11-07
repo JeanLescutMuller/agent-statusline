@@ -24,10 +24,10 @@ pages 1/2/3 as they come up.
   clauses (missing binary, unsupported version, missing patch file, and the
   important idempotent already-installed short-circuit) are covered in
   `test_codex_patch_guards.sh` without ever reaching that path.
-- agent-usage-tracker itself. `test_provider_claude.sh` covers this repo's
-  side of the contract against a stub tracker (payload piped in unchanged,
-  its printed line shown, a failing or absent tracker never breaks a render);
-  the tracker's side is tested in its own repo.
+- agent-tracker itself. `test_provider_claude.sh` covers this repo's side
+  of the contract against a hand-written `quota_latest.json` (its reading
+  shown, a passed reset at 0%, a missing window at 0%, an absent or broken
+  file never breaks a render); the tracker's side is tested in its own repo.
 
 ## Files
 
@@ -38,13 +38,13 @@ pages 1/2/3 as they come up.
 | `test_cache.sh` | `src/statusline/cache.sh` - freshness, locking, refresh, host read |
 | `test_refresh_git.sh` | `src/statusline/refresh-git.sh` against real temp repos and a local bare remote |
 | `test_refresh_metrics.sh` | `src/statusline/refresh-metrics.sh` on the real host |
-| `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the `–` with no reading, cross-session convergence without the tracker, and the contract against a stub tracker (payload forwarded, fresher tracker reading wins, stale one never freezes the display) |
-| `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation |
+| `test_provider_claude.sh` | `providers/claude-statusline-command.sh` end to end, including the `–` with no reading, cross-session convergence without the tracker, and the contract against a hand-written agent-tracker `quota_latest.json` (its reading wins, rule 8: a passed reset shows 0%, a broken file falls back to stdin), and that no heartbeat is written |
+| `test_provider_codex.sh` | `providers/codex-statusline-command.sh` end to end, including the real carousel rotation, and that no heartbeat is written |
 | `test_install.sh` | `install.sh` - idempotency, Codex-absent skip, the real TOML-merge heredoc |
 | `test_uninstall.sh` | `uninstall.sh` - full removal, `codex-patch/` preserved, orphan reporting |
 | `test_codex_patch_guards.sh` | `codex-patch/install-codex-statusline-patch.sh` guard clauses only |
 | `test_utils.sh` | `utils.sh` |
-| `test_repo_hygiene.sh` | `bash -n` on every script, shellcheck if installed, and the `codex-patch/` vs `src/statusline/`+`providers/` boundary, and that only the Claude provider touches agent-usage-tracker |
+| `test_repo_hygiene.sh` | `bash -n` on every script, shellcheck if installed, and the `codex-patch/` vs `src/statusline/`+`providers/` boundary, and that only the Claude provider touches agent-tracker, and nothing calls its old reader or keeps a heartbeat |
 
 ## Fixtures
 

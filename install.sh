@@ -6,8 +6,8 @@
 # adapters, and - when Codex is installed - builds the status-line-command
 # patch and checks ~/.codex/config.toml's [tui] status-line keys.
 #
-# Optional, not deployed here: agent-usage-tracker (README.md's
-# "agent-usage-tracker") and my-setup's get_host_color (falls back to a
+# Optional, not deployed here: agent-tracker (README.md's
+# "agent-tracker") and my-setup's get_host_color (falls back to a
 # default color).
 set -uo pipefail
 

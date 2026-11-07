@@ -44,14 +44,17 @@ other_crossers="$(grep -rl 'codex-patch' "$REPO_ROOT" \
     | grep -v -e '^'"$REPO_ROOT"'/install.sh$' -e '^'"$REPO_ROOT"'/uninstall.sh$' || true)"
 assert_eq "no other top-level script references codex-patch/" "" "$other_crossers"
 
-section "boundary with agent-usage-tracker: only the Claude provider touches it"
-# README.md's "agent-usage-tracker": the Claude provider pipes its payload
-# into the tracker's reader and shows the line it prints; nothing else
-# here knows the tracker exists.
+section "boundary with agent-tracker: only the Claude provider touches it"
+# README.md's "agent-tracker": the Claude provider reads its
+# quota_latest.json; nothing else here knows the tracker exists, and no
+# script calls it (the statusLine chain is my-setup's).
 # Comment lines are ignored.
-tracker_refs="$(grep -rn 'agent-usage-tracker\|AGENT_USAGE_TRACKER' "$REPO_ROOT/src" "$REPO_ROOT/providers" \
+tracker_refs="$(grep -rn 'agent-tracker\|AGENT_TRACKER\|agent-usage-tracker\|AGENT_USAGE_TRACKER' "$REPO_ROOT/src" "$REPO_ROOT/providers" \
     "$REPO_ROOT/codex-patch" "$REPO_ROOT/install.sh" "$REPO_ROOT/uninstall.sh" 2>/dev/null \
     | grep -v -e '^[^:]*:[0-9]*: *#' -e '^[^:]*/providers/claude-statusline-command.sh:' || true)"
-assert_eq "no other code references agent-usage-tracker" "" "$tracker_refs"
+assert_eq "no other code references agent-tracker" "" "$tracker_refs"
+old_refs="$(grep -rn 'agent-usage-tracker\|AGENT_USAGE_TRACKER\|statusline_payload_reader\|heartbeat' "$REPO_ROOT/src" "$REPO_ROOT/providers" \
+    2>/dev/null || true)"
+assert_eq "no code calls the old tracker reader or keeps a heartbeat" "" "$old_refs"
 
 harness_summary
