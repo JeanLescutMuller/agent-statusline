@@ -1,5 +1,7 @@
 # agent-statusline
 
+**One status line for both Claude Code and Codex CLI: the account's 5-hour and weekly quota, git status and more, the same three lines in both, no root needed.**
+
 Shared Claude Code / Codex status line: thin provider adapters around the same shell cache/format library and lazy caches. Claude keeps its three-line layout. Codex displays those same three lines as a one-line carousel, advancing every four seconds.
 
 Personal, user-space tool - safe to run on any machine you don't own (no root/sudo assumed anywhere, aside from Codex's own install).
