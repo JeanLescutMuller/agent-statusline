@@ -88,7 +88,7 @@ statusline_spinner_frame "$spin_index" spinner
 
 printf '%s\n' "${STATUSLINE_GRAY_1}🤖 ${model_display}${STATUSLINE_RESET}    ${host_color}🖥️  ${STATUSLINE_HOSTNAME}${STATUSLINE_RESET}    ${STATUSLINE_GRAY_2}📂 ${display_cwd}${STATUSLINE_RESET}${git_segment}"
 printf '%s\n' "${STATUSLINE_GRAY_4}🆔 ${session_id}    ${resets_segment}    ${spinner}${STATUSLINE_RESET}"
-# The other accounts together: "/y%" in dark gray after each of the 5h and 7d numbers, y = their used %, each weighed by
+# All the accounts together, this one included: "/y%" in dark gray after each of the 5h and 7d numbers, y = their used %, each weighed by
 # its account's size (src/statusline/account_weights: "<name> <weight>" per line, 1 when absent): sum(w*pct) / sum(w).
 # Their quota_latest*.json sit beside ours; a window reads 0% once its reset has passed, as above; a file jq cannot read
 # is left out. Nothing is added when there is no other account.
@@ -103,7 +103,7 @@ others="$(for other_file in "$quota_dir"/quota_latest.json "$quota_dir"/quota_la
         sed "s/^/$(basename "$other_file" .json | sed -e 's/^quota_latest\.*//' -e 's/^$/a/') /"
 done)"
 if [ -n "$others" ]; then
-    read -r others_five others_week < <(printf '%s\n' "$others" | awk -v wf="$lib_dir/account_weights" '
+    read -r others_five others_week < <(printf '%s %s %s\n%s\n' "$account" "${five_pct:-0}" "${week_pct:-0}" "$others" | awk -v wf="$lib_dir/account_weights" '
         BEGIN { while ((getline l < wf) > 0) if (split(l, x, " ") == 2) wt[x[1]] = x[2] }
         { k = ($1 in wt) ? wt[$1] : 1; f += k * $2; w += k * $3; n += k }
         END { printf "%d %d\n", f/n+0.5, w/n+0.5 }')
