@@ -10,7 +10,12 @@ statusline_cache_init
 # Optional: the separate agent-tracker project. See README.md's
 # "agent-tracker" for the whole contract (one file, read here, never
 # written) - this file is the only place that touches it.
-quota_file="${AGENT_TRACKER_HOME:-$HOME/opt/agent-tracker}/data/claude/quota_latest.json"
+quota_dir="${AGENT_TRACKER_HOME:-$HOME/opt/agent-tracker}/data/claude"
+# Several Claude accounts (2026-11-19, my-setup's claude-account): a session on account NAME (CLAUDE_ACCOUNT, set by
+# the wrapper; empty or "a" = the main account) shows its own account's file, quota_latest.NAME.json.
+account="${CLAUDE_ACCOUNT:-a}"
+case "$account" in *[!a-z0-9_-]*) account=a ;; esac
+if [ "$account" = a ]; then quota_file="$quota_dir/quota_latest.json"; else quota_file="$quota_dir/quota_latest.$account.json"; fi
 
 now="$(date '+%s')"
 
@@ -73,6 +78,7 @@ fi
 
 model_display="$model"
 [ -n "$effort" ] && model_display="$model ($effort)"
+[ "$account" != a ] && model_display="$model_display [$account]"
 
 statusline_common_segments
 
@@ -82,4 +88,18 @@ statusline_spinner_frame "$spin_index" spinner
 
 printf '%s\n' "${STATUSLINE_GRAY_1}🤖 ${model_display}${STATUSLINE_RESET}    ${host_color}🖥️  ${STATUSLINE_HOSTNAME}${STATUSLINE_RESET}    ${STATUSLINE_GRAY_2}📂 ${display_cwd}${STATUSLINE_RESET}${git_segment}"
 printf '%s\n' "${STATUSLINE_GRAY_4}🆔 ${session_id}    ${resets_segment}    ${spinner}${STATUSLINE_RESET}"
-printf '%s\n' "${context_segment}    ${five_segment}    ${week_segment}${memory_segment}"
+# The other accounts' 7d meters (their quota_latest*.json beside ours), when there are any: "a 82% · b 7%". Each
+# window reads 0% once its reset has passed, as above; a file jq cannot read is left out.
+others_segment=""
+for other_file in "$quota_dir"/quota_latest.json "$quota_dir"/quota_latest.*.json; do
+    [ -r "$other_file" ] && [ "$other_file" != "$quota_file" ] || continue
+    other="$(jq -r --argjson now "$now" --arg dflt "$(basename "$other_file" | sed -e 's/^quota_latest\.//' -e 's/\.json$//')" '
+        if type == "object" and (.seven_day | type) == "object" then
+            ((.account_name // (if $dflt == "json" then "a" else $dflt end)) + " " +
+             (if (.seven_day.resets_at | type) == "number" and .seven_day.resets_at <= $now then "0"
+              else ((.seven_day.used_percentage // 0) | round | tostring) end) + "%")
+        else empty end' "$other_file" 2>/dev/null)" || other=""
+    [ -n "$other" ] && others_segment="${others_segment:+$others_segment · }$other"
+done
+[ -n "$others_segment" ] && others_segment="    ${STATUSLINE_GRAY_2}👥 ${others_segment}${STATUSLINE_RESET}"
+printf '%s\n' "${context_segment}    ${five_segment}    ${week_segment}${others_segment}${memory_segment}"
