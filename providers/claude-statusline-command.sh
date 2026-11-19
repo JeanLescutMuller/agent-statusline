@@ -88,9 +88,10 @@ statusline_spinner_frame "$spin_index" spinner
 
 printf '%s\n' "${STATUSLINE_GRAY_1}🤖 ${model_display}${STATUSLINE_RESET}    ${host_color}🖥️  ${STATUSLINE_HOSTNAME}${STATUSLINE_RESET}    ${STATUSLINE_GRAY_2}📂 ${display_cwd}${STATUSLINE_RESET}${git_segment}"
 printf '%s\n' "${STATUSLINE_GRAY_4}🆔 ${session_id}    ${resets_segment}    ${spinner}${STATUSLINE_RESET}"
-# The other accounts together: "/y%" in dark gray after each of the 5h and 7d numbers, y = the average of the other
-# accounts' used % (their quota_latest*.json beside ours; a window reads 0% once its reset has passed, as above; a file
-# jq cannot read is left out). Nothing is added when there is no other account.
+# The other accounts together: "/y%" in dark gray after each of the 5h and 7d numbers, y = their used %, each weighed by
+# its account's size (src/statusline/account_weights: "<name> <weight>" per line, 1 when absent): sum(w*pct) / sum(w).
+# Their quota_latest*.json sit beside ours; a window reads 0% once its reset has passed, as above; a file jq cannot read
+# is left out. Nothing is added when there is no other account.
 others_five=""; others_week=""
 others="$(for other_file in "$quota_dir"/quota_latest.json "$quota_dir"/quota_latest.*.json; do
     [ -r "$other_file" ] && [ "$other_file" != "$quota_file" ] || continue
@@ -98,10 +99,14 @@ others="$(for other_file in "$quota_dir"/quota_latest.json "$quota_dir"/quota_la
         def pct($w): if ($w | type) != "object" then 0
             elif ($w.resets_at | type) == "number" and $w.resets_at <= $now then 0
             else ($w.used_percentage // 0) end;
-        if type == "object" then "\(pct(.five_hour)) \(pct(.seven_day))" else empty end' "$other_file" 2>/dev/null
+        if type == "object" then "\(pct(.five_hour)) \(pct(.seven_day))" else empty end' "$other_file" 2>/dev/null |
+        sed "s/^/$(basename "$other_file" .json | sed -e 's/^quota_latest\.*//' -e 's/^$/a/') /"
 done)"
 if [ -n "$others" ]; then
-    read -r others_five others_week < <(printf '%s\n' "$others" | awk '{f+=$1; w+=$2; n++} END {printf "%d %d\n", f/n+0.5, w/n+0.5}')
+    read -r others_five others_week < <(printf '%s\n' "$others" | awk -v wf="$lib_dir/account_weights" '
+        BEGIN { while ((getline l < wf) > 0) if (split(l, x, " ") == 2) wt[x[1]] = x[2] }
+        { k = ($1 in wt) ? wt[$1] : 1; f += k * $2; w += k * $3; n += k }
+        END { printf "%d %d\n", f/n+0.5, w/n+0.5 }')
     [ -n "$five_pct" ] && five_segment="${five_segment}${STATUSLINE_GRAY_4}/${others_five}%${STATUSLINE_RESET}"
     [ -n "$week_pct" ] && week_segment="${week_segment}${STATUSLINE_GRAY_4}/${others_week}%${STATUSLINE_RESET}"
 fi

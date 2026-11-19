@@ -168,6 +168,11 @@ assert_contains "account b: [b] after the model" "$(printf '%s\n' "$TH_OUT_B" | 
 assert_contains "...its own 5h: b's 9%, not a's 61%" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "9%"
 assert_contains "...and the other accounts' 5h after it: a's /61%" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "/61%"
 assert_contains "...and 7d: /72%" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "/72%"
+printf '%s\n' "{\"ts\":3,\"account_name\":\"c\",\"five_hour\":{\"used_percentage\":0,\"resets_at\":$future},\"seven_day\":{\"used_percentage\":0,\"resets_at\":$future_week}}" \
+    > "$AGENT_TRACKER_HOME/data/claude/quota_latest.c.json"
+TH_OUT_B="$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json" | CLAUDE_ACCOUNT=b HOME="$TH_HOME" bash "$PROVIDER" 2>/dev/null)"
+assert_contains "weighted by size (a=5, c=1 by default weights): a 61% and c 0% give /51%, not the plain average 31%" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "/51%"
+rm -f "$AGENT_TRACKER_HOME/data/claude/quota_latest.c.json"
 rm -f "$AGENT_TRACKER_HOME/data/claude/quota_latest.b.json"
 TH_OUT_B="$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-b.json" | CLAUDE_ACCOUNT=b HOME="$TH_HOME" bash "$PROVIDER" 2>/dev/null)"
 assert_contains "account b without its file yet: its own session's reading (25%)" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "25%"
