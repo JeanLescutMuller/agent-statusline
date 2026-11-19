@@ -26,4 +26,17 @@ assert_status "used does not exceed total" 0 $?
 [ "$pct" -ge 0 ] && [ "$pct" -le 100 ]
 assert_status "percent is within 0-100" 0 $?
 
+section "resource-guard's last line, when at most 3 min old"
+FAKE="$(mktemp -d)"; mkdir -p "$FAKE/opt/resource-guard/data"
+RG="$FAKE/opt/resource-guard/data/$(date -u +%Y-%m).tsv"
+printf 'ts\tdt\tcpu_pct\tcpu_max_pct\ttotal_gb\tused_gb\n%s\tx\t1\t2\t16.0\t12.04\n' "$(date +%s)" > "$RG"
+th_run env HOME="$FAKE" bash "$REFRESH"
+assert_eq "used, total, percent come from the line" "12.0${SEP}16.0${SEP}75" "$TH_OUT"
+printf 'ts\tdt\tcpu_pct\tcpu_max_pct\ttotal_gb\tused_gb\n%s\tx\t1\t2\t16.0\t12.04\n' "$(( $(date +%s) - 600 ))" > "$RG"
+th_run env HOME="$FAKE" bash "$REFRESH"
+assert_status "a 10-min-old line: computed instead, exits 0" 0 "$TH_STATUS"
+[ "$TH_OUT" != "12.0${SEP}16.0${SEP}75" ]
+assert_status "  ...and not the stale value" 0 $?
+rm -rf "$FAKE"
+
 harness_summary
