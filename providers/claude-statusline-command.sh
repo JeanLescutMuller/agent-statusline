@@ -88,18 +88,21 @@ statusline_spinner_frame "$spin_index" spinner
 
 printf '%s\n' "${STATUSLINE_GRAY_1}🤖 ${model_display}${STATUSLINE_RESET}    ${host_color}🖥️  ${STATUSLINE_HOSTNAME}${STATUSLINE_RESET}    ${STATUSLINE_GRAY_2}📂 ${display_cwd}${STATUSLINE_RESET}${git_segment}"
 printf '%s\n' "${STATUSLINE_GRAY_4}🆔 ${session_id}    ${resets_segment}    ${spinner}${STATUSLINE_RESET}"
-# The other accounts' 7d meters (their quota_latest*.json beside ours), when there are any: "a 82% · b 7%". Each
-# window reads 0% once its reset has passed, as above; a file jq cannot read is left out.
-others_segment=""
-for other_file in "$quota_dir"/quota_latest.json "$quota_dir"/quota_latest.*.json; do
+# The other accounts together: "/y%" in dark gray after each of the 5h and 7d numbers, y = the average of the other
+# accounts' used % (their quota_latest*.json beside ours; a window reads 0% once its reset has passed, as above; a file
+# jq cannot read is left out). Nothing is added when there is no other account.
+others_five=""; others_week=""
+others="$(for other_file in "$quota_dir"/quota_latest.json "$quota_dir"/quota_latest.*.json; do
     [ -r "$other_file" ] && [ "$other_file" != "$quota_file" ] || continue
-    other="$(jq -r --argjson now "$now" --arg dflt "$(basename "$other_file" | sed -e 's/^quota_latest\.//' -e 's/\.json$//')" '
-        if type == "object" and (.seven_day | type) == "object" then
-            ((.account_name // (if $dflt == "json" then "a" else $dflt end)) + " " +
-             (if (.seven_day.resets_at | type) == "number" and .seven_day.resets_at <= $now then "0"
-              else ((.seven_day.used_percentage // 0) | round | tostring) end) + "%")
-        else empty end' "$other_file" 2>/dev/null)" || other=""
-    [ -n "$other" ] && others_segment="${others_segment:+$others_segment · }$other"
-done
-[ -n "$others_segment" ] && others_segment="    ${STATUSLINE_GRAY_2}👥 ${others_segment}${STATUSLINE_RESET}"
-printf '%s\n' "${context_segment}    ${five_segment}    ${week_segment}${others_segment}${memory_segment}"
+    jq -r --argjson now "$now" '
+        def pct($w): if ($w | type) != "object" then 0
+            elif ($w.resets_at | type) == "number" and $w.resets_at <= $now then 0
+            else ($w.used_percentage // 0) end;
+        if type == "object" then "\(pct(.five_hour)) \(pct(.seven_day))" else empty end' "$other_file" 2>/dev/null
+done)"
+if [ -n "$others" ]; then
+    read -r others_five others_week < <(printf '%s\n' "$others" | awk '{f+=$1; w+=$2; n++} END {printf "%d %d\n", f/n+0.5, w/n+0.5}')
+    [ -n "$five_pct" ] && five_segment="${five_segment}${STATUSLINE_GRAY_4}/${others_five}%${STATUSLINE_RESET}"
+    [ -n "$week_pct" ] && week_segment="${week_segment}${STATUSLINE_GRAY_4}/${others_week}%${STATUSLINE_RESET}"
+fi
+printf '%s\n' "${context_segment}    ${five_segment}    ${week_segment}${memory_segment}"
