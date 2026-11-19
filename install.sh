@@ -35,7 +35,7 @@ _deploy() {
 
 step "shared cache library"
 mkdir -p "$LIB_DIR"
-for f in "$SCRIPT_DIR"/src/statusline/*.sh; do
+for f in "$SCRIPT_DIR"/src/statusline/*.sh "$SCRIPT_DIR"/src/statusline/account_weights; do
     _deploy "$f" "$LIB_DIR/$(basename "$f")"
 done
 
