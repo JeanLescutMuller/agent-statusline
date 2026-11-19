@@ -1,9 +1,11 @@
 ---
 name: patch-statusline
-description: Restore the custom Codex status line after a Codex CLI update using agent-statusline's installer. Use when an update removes the status line or the user asks to patch or reinstall it; adapt the shared patch only when the installed release needs it.
+description: Restore the custom Codex status line after a Codex CLI update by building agent-statusline's Codex patch. Use ONLY when the user expressly asks to build, patch or reinstall the Codex status line, never on your own (a build takes many GB of memory: on 2026-11-19 one took ~19 GB of the Mac's 16 GB); adapt the shared patch only when the installed release needs it.
 ---
 
 # Patch the Codex status line
+
+**Only when the user expressly asks for it, in that conversation** (the user, 2026-11-19). Never because the status line is missing, never from an install, a job or another agent's request. Before building: `resource-status --need-gb 8`; exit 1 → tell the user and wait.
 
 Work from `/Users/jeanlescut/dev/agent-statusline` on the MacBook. Read its `AGENTS.md` first and preserve unrelated working-tree changes. Commit only your changes, never push. Use command `workdir` rather than changing the user's live shell directory. Restore the installed Codex version; upgrading Codex is a separate request.
 

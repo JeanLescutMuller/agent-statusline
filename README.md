@@ -28,7 +28,7 @@ bash install.sh     # fresh install
 Two independent mandates share this repo:
 
 - **Statusline architecture** — `src/statusline/` + `providers/`, deployed by `install.sh` and invoked on every render by Claude Code / Codex. This is the runtime path: shared cache, formatting, and per-provider adapters.
-- **Codex patch** — `codex-patch/`, invoked once by `install.sh` (only when `codex` is on `PATH`) to give Codex's TUI a `status_line_command` extension point it doesn't ship with on the pinned version. Build-time only; nothing in it runs on a render.
+- **Codex patch** — `codex-patch/`, run only by hand, when the user expressly asks (never by `install.sh`, never automatically: a build took ~19 GB on 2026-11-19) to give Codex's TUI a `status_line_command` extension point it doesn't ship with on the pinned version. Build-time only; nothing in it runs on a render.
 
 The diagram below is the **runtime view only** — what runs when a session renders its statusline. Dashed boxes belong to agent-tracker and are optional.
 

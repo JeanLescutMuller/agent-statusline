@@ -2,7 +2,7 @@
 # End-to-end tests for install.sh, run against a temp $HOME so nothing ever
 # touches the real machine. `codex` is kept off PATH (actually exercising
 # the Codex binary patch means a real network clone and Cargo build), except
-# for a stub in the config-check section, where the patch step fails fast.
+# for a stub in the config-check section (install.sh never builds the patch: only by hand, when the user asks).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
@@ -64,6 +64,8 @@ th_home="$(mktemp -d "${TMPDIR:-/tmp}/agent-statusline-installhome.XXXXXX")"
 TH_OUT="$(HOME="$th_home" PATH="$stub_bin:$CODEX_FREE_PATH" bash "$INSTALL" 2>/dev/null)"
 assert_contains "no config.toml: prints the keys to add" "$TH_OUT" 'status_line = ["custom"]'
 assert_file_missing "...and does not create the file" "$th_home/.codex/config.toml"
+assert_contains "Codex installed: the patch is never built by install.sh" "$TH_OUT" "never built by install.sh"
+assert_file_missing "...nothing built or deployed" "$th_home/.codex/packages"
 printf '[tui]\nstatus_line = ["custom"]\nstatus_line_use_colors = true\n' > "$th_home/.codex/config.toml"
 before="$(cat "$th_home/.codex/config.toml")"
 TH_OUT="$(HOME="$th_home" PATH="$stub_bin:$CODEX_FREE_PATH" bash "$INSTALL" 2>/dev/null)"

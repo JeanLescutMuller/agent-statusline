@@ -97,12 +97,10 @@ for src in "$SCRIPT_DIR"/skills/*/; do
 done
 
 step "codex status-line patch"
+# Never built here, never automatically (the user, 2026-11-19: a build took ~19 GB of the Mac's 16 GB): only when the
+# user asks for it, by hand: bash codex-patch/install-codex-statusline-patch.sh
 if command -v codex >/dev/null 2>&1; then
-    if bash "$SCRIPT_DIR/codex-patch/install-codex-statusline-patch.sh"; then
-        ok "Codex status-line patch"
-    else
-        fail "Codex status-line patch"
-    fi
+    skip "Codex status-line patch (never built by install.sh: only when the user asks, bash $SCRIPT_DIR/codex-patch/install-codex-statusline-patch.sh)"
 else
     skip "Codex status-line patch (Codex not installed)"
 fi
