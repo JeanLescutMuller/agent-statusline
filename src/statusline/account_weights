@@ -1,4 +1,4 @@
-# Size of each Claude account, relative (Max 5x = 5, Pro = 1). Weighs the /y% of the other accounts; 1 when absent.
+# Size of each Claude account, relative (Max 5x = 5, Pro = 1; both accounts on Max since 2026-11-20). Weighs the /y% of the other accounts; 1 when absent.
 # Edit in ~/dev/agent-statusline, then run install.sh.
 a 5
-b 1
+b 5

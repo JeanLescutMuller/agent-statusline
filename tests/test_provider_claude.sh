@@ -19,6 +19,13 @@ PROVIDER="$REPO_ROOT/providers/claude-statusline-command.sh"
 FIXTURES="$TESTS_DIR/fixtures"
 
 th_tmp_runtime
+# Not the caller's account: a test run from a session on account b would read b's quota file.
+unset CLAUDE_ACCOUNT CLAUDE_CONFIG_DIR
+# Their own account sizes: the assertions below assume a=5, b=1, whatever the real src/statusline/account_weights says (both accounts
+# are Max since 2026-11-20: b 5). A copy of the library with a fixed weights file.
+cp -R "$STATUSLINE_LIB_DIR" "$TH_TMP/lib"
+printf 'a 5\nb 1\n' > "$TH_TMP/lib/account_weights"
+export STATUSLINE_LIB_DIR="$TH_TMP/lib"
 TH_HOME="$(mktemp -d "$TH_TMP/home.XXXXXX")"
 TH_HOME="$(cd "$TH_HOME" && pwd -P)"
 export AGENT_TRACKER_HOME="$TH_TMP/no-tracker"
