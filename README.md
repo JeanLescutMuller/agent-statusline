@@ -184,3 +184,7 @@ A hermetic bash test suite covering every file above - see `tests/README.md` for
 ## Offline testing
 
 Set `STATUSLINE_RUNTIME_DIR` to a temporary directory, `STATUSLINE_LIB_DIR` to this repository's `src/statusline/` directory, and `AGENT_TRACKER_HOME` to an empty directory, then pipe a captured provider payload into the corresponding renderer. The first render may refresh stale data; subsequent Codex renders should start only Bash and one payload `jq`. That `jq` also supplies the refresh epoch used for cache freshness and carousel selection. `tests/run.sh` automates exactly this pattern.
+
+## See also: several Claude accounts
+
+Several Claude accounts on one machine: the overview (why, designs, how to use it, every piece and where it lives) is `/Users/jeanlescut/dev/my-setup/doc/claude_accounts.html`.
