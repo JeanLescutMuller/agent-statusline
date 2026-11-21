@@ -112,12 +112,24 @@ CONFIG="$HOME/.codex/config.toml"
 if ! command -v codex >/dev/null 2>&1; then
     skip "Codex status line (Codex not installed)"
 elif python3 - "$CONFIG" <<'EOF'
-import sys, tomllib
+import re, sys
+# tomllib exists from Python 3.11 only: the system Python of a macOS job (3.9) has none, so without it read the [tui] table by hand.
 try:
-    d_tui = tomllib.load(open(sys.argv[1], "rb")).get("tui", {})
-except (OSError, tomllib.TOMLDecodeError):
+    import tomllib
+except ImportError:
+    tomllib = None
+try:
+    if tomllib:
+        d_tui = tomllib.load(open(sys.argv[1], "rb")).get("tui", {})
+        ok = d_tui.get("status_line") == ["custom"] and d_tui.get("status_line_use_colors") is True
+    else:
+        tui = re.search(r"(?ms)^\[tui\]\s*$(.*?)(?=^\[|\Z)", open(sys.argv[1]).read())
+        body = tui.group(1) if tui else ""
+        ok = bool(re.search(r'(?m)^\s*status_line\s*=\s*\[\s*"custom"\s*\]\s*(#.*)?$', body)
+                  and re.search(r"(?m)^\s*status_line_use_colors\s*=\s*true\s*(#.*)?$", body))
+except (OSError, ValueError):
     sys.exit(1)
-sys.exit(0 if d_tui.get("status_line") == ["custom"] and d_tui.get("status_line_use_colors") is True else 1)
+sys.exit(0 if ok else 1)
 EOF
 then
     ok "status line"
