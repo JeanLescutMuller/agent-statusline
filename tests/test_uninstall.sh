@@ -9,7 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
 INSTALL="$REPO_ROOT/install.sh"
 UNINSTALL="$REPO_ROOT/uninstall.sh"
-CODEX_FREE_PATH="/opt/anaconda3/bin:/usr/bin:/bin:/opt/homebrew/bin:/usr/sbin:/sbin"
+CODEX_FREE_PATH="/usr/bin:/bin:/opt/homebrew/bin:/usr/sbin:/sbin"
 
 run_install() {
     local home="$1"
