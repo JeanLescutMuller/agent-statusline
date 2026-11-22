@@ -1,6 +1,6 @@
 # agent-statusline development instructions
 
-Development home: NAS (moving: until the move, edit it on the Mac; task D3). Why (U19, the user, 2026-11-22): the NAS by default; its Mac parts are installed on the Mac from GitHub with one command.
+Development home: NAS (`~/dev/agent-statusline` on the NAS, since 2026-11-22; no copy on the Mac: `tm agent-statusline` opens it). Why (U19, the user, 2026-11-22): the NAS by default; its Mac parts are installed on the Mac from GitHub with one command: `dev-install agent-statusline` (my-setup).
 
 These instructions govern development of this repository. User-facing usage,
 runtime layout, and the cache design are documented in `README.md` — this
