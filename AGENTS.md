@@ -1,5 +1,7 @@
 # agent-statusline development instructions
 
+Development home: NAS (moving: until the move, edit it on the Mac; task D3). Why (U19, the user, 2026-11-22): the NAS by default; its Mac parts are installed on the Mac from GitHub with one command.
+
 These instructions govern development of this repository. User-facing usage,
 runtime layout, and the cache design are documented in `README.md` — this
 file only covers things relevant to *working on* the project.
