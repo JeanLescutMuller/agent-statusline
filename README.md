@@ -57,7 +57,7 @@ flowchart TB
         direction LR
         tick["agent-tracker tick
         records the payload, copies it to stdout"]
-        ccC[("data/claude/quota_latest.json")]
+        ccC[("data/claude/quota_latest.&lt;name&gt;.json")]
         pollers["pollers (LaunchAgent)"]
     end
 
@@ -82,8 +82,8 @@ The whole contract between the two projects is one file, written by agent-tracke
 
 | Interface | Written by | Read by | What |
 |---|---|---|---|
-| `$AGENT_TRACKER_HOME/data/claude/quota_latest.json` (default `~/opt/agent-tracker`) | agent-tracker (`tick`, its pollers), temp + rename | Claude provider, every render | The account's freshest 5h/7d reading: `{"ts","dt","source","machine","five_hour":{"used_percentage","resets_at"},"seven_day":{…}}`, the shape of stdin's `rate_limits` (agent-tracker's `IMPLEMENTATION.md` §4). Displayed after its `FOR_READERS.md` rule 8: a window whose `resets_at` has passed shows 0% (its reset shows `now`). A missing window: 0%. No file, or one `jq` cannot read as an object: the session's own stdin reading. |
-| `$AGENT_TRACKER_HOME/data/claude/quota_latest.<name>.json` (since 2026-11-19) | agent-tracker, same way, for a Claude account other than the main one | Several Claude accounts (my-setup's `claude-account`): a session with `CLAUDE_ACCOUNT=<name>` (not `a`) shows its own account's file (same shape, plus `account_name`, `account`) and `[<name>]` after its model; without the file, its own stdin reading, never the main account's. On the 3rd line, `/y%` in dark gray follows the 5h and the 7d numbers: y is the used % of all the accounts, this one included, weighed by account size (`src/statusline/account_weights`, `<name> <weight>` per line, 1 when absent; edit, then `install.sh`), each after rule 8 (nothing with a single account). |
+| `$AGENT_TRACKER_HOME/data/claude/quota_latest.<name>.json` (one per Claude account; default `~/opt/agent-tracker`) | agent-tracker (`tick`, its pollers), temp + rename | Claude provider, every render | The account's freshest 5h/7d reading: `{"ts","dt","source","machine","five_hour":{"used_percentage","resets_at"},"seven_day":{…}}`, the shape of stdin's `rate_limits` (agent-tracker's `IMPLEMENTATION.md` §4). Displayed after its `FOR_READERS.md` rule 8: a window whose `resets_at` has passed shows 0% (its reset shows `now`). A missing window: 0%. No file, or one `jq` cannot read as an object: the session's own stdin reading. |
+| (the same files, several accounts) | | Several Claude accounts (my-setup's `claude-account`, since 2026-11-19) | A session with `CLAUDE_ACCOUNT=<name>` shows its own account's file (same shape, plus `account_name`, `account`); without `CLAUDE_ACCOUNT` (a session started outside the wrapper): the account with the most room left (100 - max(5h %, 7d %); a tie: the first name; no file: `a`). Without its file, its own stdin reading. With more than one account, `[<name>]` follows the model, for every account. On the 3rd line, `/y%` in dark gray follows the 5h and the 7d numbers: y is the used % of all the accounts, this one included, weighed by account size (`src/statusline/account_weights`, `<name> <weight>` per line, 1 when absent; edit, then `install.sh`), each after rule 8 (nothing with a single account). |
 
 `AGENT_TRACKER_HOME` overrides the tracker's location (the tests point it at a temp dir). Before 2026-11-07, every render piped its payload into the tracker's `src/statusline_payload_reader.py` and printed its line, and touched `state/heartbeat/{claude,codex}` for the tracker's pollers; both are gone (the pollers read agent-tracker's own `last_seen.json`).
 
@@ -138,7 +138,7 @@ Nothing is logged: a failed refresh shows as a stale or missing segment. Rerun t
 | Memory | machine | 30s | 1s |
 | Git | exact cwd | 8s | 1s |
 
-Claude quotas aren't in this table: every render reads agent-tracker's `quota_latest.json` (see "agent-tracker").
+Claude quotas aren't in this table: every render reads agent-tracker's `quota_latest.<name>.json` (see "agent-tracker").
 
 ## Codex status-line patch
 
@@ -162,7 +162,7 @@ Statusline architecture (runs on every render):
 - `src/statusline/cache.sh`: paths, freshness, locking, timeouts, atomic writes, and the spinner counter.
 - `src/statusline/format.sh`: shared colors, bars, limits, and Git formatting.
 - `src/statusline/refresh-*.sh`: one bounded refresh attempt, without cache policy.
-- `providers/claude-statusline-command.sh`: Claude adapter and multiline layout; the only file that touches agent-tracker (it reads `quota_latest.json`).
+- `providers/claude-statusline-command.sh`: Claude adapter and multiline layout; the only file that touches agent-tracker (it reads `quota_latest.<name>.json`).
 - `providers/codex-statusline-command.sh`: Codex adapter and one-line layout.
 - `install.sh` + `utils.sh`: deployment and the Codex config check - assumes a bare machine, no migration logic.
 - `uninstall.sh`: removes everything `install.sh` deploys; preserves `codex-patch/`; flags anything else left over as an orphan.

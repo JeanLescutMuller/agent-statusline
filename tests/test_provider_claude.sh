@@ -10,7 +10,7 @@
 #
 # agent-tracker is never the real one: AGENT_TRACKER_HOME points at an empty
 # temp dir (tracker absent) or at one holding a hand-written
-# data/claude/quota_latest.json - this suite tests this repo's side of the
+# data/claude/quota_latest.<name>.json - this suite tests this repo's side of the
 # contract only.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
@@ -126,29 +126,29 @@ assert_file_missing "no quota file of our own" "$STATUSLINE_RUNTIME_DIR/state/qu
 assert_file_missing "no heartbeat any more (agent-tracker's last_seen.json replaces it)" \
     "$STATUSLINE_RUNTIME_DIR/state/heartbeat"
 
-# A hand-written quota_latest.json, in agent-tracker's format
+# A hand-written quota_latest.a.json, in agent-tracker's format
 # (IMPLEMENTATION.md §4: the shape of stdin's rate_limits, plus ts/dt/source).
 future=$(( $(date '+%s') + 3 * 3600 ))
 future_week=$(( $(date '+%s') + 3 * 86400 ))
 past=$(( $(date '+%s') - 60 ))
 quota_file() {
     mkdir -p "$AGENT_TRACKER_HOME/data/claude"
-    printf '%s\n' "$1" > "$AGENT_TRACKER_HOME/data/claude/quota_latest.json"
+    printf '%s\n' "$1" > "$AGENT_TRACKER_HOME/data/claude/quota_latest.a.json"
 }
 line3_of() { printf '%s\n' "$TH_OUT" | sed -n 3p; }
 
-section "agent-tracker present: its quota_latest.json is shown, not stdin's reading"
+section "agent-tracker present: its quota_latest.a.json is shown, not stdin's reading (no CLAUDE_ACCOUNT, one account: a)"
 AGENT_TRACKER_HOME="$TH_TMP/tracker"
 quota_file "{\"ts\":1794051573,\"dt\":\"2026-11-07T11:39:33Z\",\"source\":\"poller\",\"machine\":\"m\",
   \"five_hour\":{\"used_percentage\":61,\"resets_at\":$future},\"seven_day\":{\"used_percentage\":72,\"resets_at\":$future_week}}"
-before="$(cat "$AGENT_TRACKER_HOME/data/claude/quota_latest.json")"
+before="$(cat "$AGENT_TRACKER_HOME/data/claude/quota_latest.a.json")"
 run_claude "$TH_TMP/payload-a.json" "$plain_dir"
 assert_status "exits 0" 0 "$TH_STATUS"
 assert_contains "5h comes from the file" "$TH_OUT" "61%"
 assert_contains "7d too" "$TH_OUT" "72%"
 assert_not_contains "not this session's own 24%" "$TH_OUT" "24%"
 assert_contains "resets come from the file too (5h in 3h)" "$TH_OUT" "3h"
-assert_eq "the file is only read, never written" "$before" "$(cat "$AGENT_TRACKER_HOME/data/claude/quota_latest.json")"
+assert_eq "the file is only read, never written" "$before" "$(cat "$AGENT_TRACKER_HOME/data/claude/quota_latest.a.json")"
 run_claude "$FIXTURES/claude-payload-minimal.json" "$plain_dir"
 assert_contains "a render with no rate_limits shows the file's reading" "$TH_OUT" "61%"
 
@@ -164,12 +164,15 @@ section "several accounts (2026-11-19): a session on account b shows b's file, [
 quota_file "{\"ts\":1,\"five_hour\":{\"used_percentage\":61,\"resets_at\":$future},\"seven_day\":{\"used_percentage\":72,\"resets_at\":$future_week}}"
 printf '%s\n' "{\"ts\":2,\"account_name\":\"b\",\"account\":\"22222222-2222-4222-8222-222222222222\",\"five_hour\":{\"used_percentage\":9,\"resets_at\":$future},\"seven_day\":{\"used_percentage\":33,\"resets_at\":$future_week}}" \
     > "$AGENT_TRACKER_HOME/data/claude/quota_latest.b.json"
-run_claude "$TH_TMP/payload-a.json" "$plain_dir"
-assert_not_contains "a session on the main account has no [name] tag" "$(printf '%s\n' "$TH_OUT" | sed -n 1p)" "[a]"
+CLAUDE_ACCOUNT=a run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_contains "with two accounts every session shows its account after the model: [a]" "$(printf '%s\n' "$TH_OUT" | sed -n 1p)" "[a]"
 assert_contains "...it shows a's 72% and, after it, b's week: 33%" "$(line3_of)" "72%"
 assert_contains "...all accounts together, weighed a=5 b=1: 5h (5*61+9)/6 = /52%" "$(line3_of)" "/52%"
 assert_contains "...(7d) (5*72+33)/6 = /66%" "$(line3_of)" "/66%"
 assert_not_contains "...no 👥 list any more" "$(line3_of)" "👥"
+run_claude "$TH_TMP/payload-a.json" "$plain_dir"
+assert_contains "no CLAUDE_ACCOUNT: the account with the most room (b: 67% left, a: 28%), its 5h 9%" "$(line3_of)" "9%"
+assert_contains "...tagged [b]" "$(printf '%s\n' "$TH_OUT" | sed -n 1p)" "[b]"
 TH_OUT_B="$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json" | CLAUDE_ACCOUNT=b HOME="$TH_HOME" bash "$PROVIDER" 2>/dev/null)"
 assert_contains "account b: [b] after the model" "$(printf '%s\n' "$TH_OUT_B" | sed -n 1p)" "[b]"
 assert_contains "...its own 5h: b's 9%, not a's 61%" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "9%"
@@ -185,7 +188,7 @@ TH_OUT_B="$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-b.json" | CLAUDE_ACCOUN
 assert_contains "account b without its file yet: its own session's reading (25%)" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "25%"
 assert_contains "...the total counts b's own reading (25%) and a (61%): (5*61+25)/6 = /55%" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "/55%"
 TH_OUT_B="$(sed "s#__CWD__#$plain_dir#" "$TH_TMP/payload-a.json" | CLAUDE_ACCOUNT='../x' HOME="$TH_HOME" bash "$PROVIDER" 2>/dev/null)"
-assert_contains "a hostile CLAUDE_ACCOUNT falls back to the main account" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "61%"
+assert_contains "a hostile CLAUDE_ACCOUNT falls back to the account with the most room (a: the only file left)" "$(printf '%s\n' "$TH_OUT_B" | sed -n 3p)" "61%"
 
 section "a window missing from the file is at 0%, as on stdin"
 quota_file "{\"ts\":1,\"seven_day\":{\"used_percentage\":16,\"resets_at\":$future_week}}"

@@ -12,10 +12,24 @@ statusline_cache_init
 # written) - this file is the only place that touches it.
 quota_dir="${AGENT_TRACKER_HOME:-$HOME/opt/agent-tracker}/data/claude"
 # Several Claude accounts (2026-11-19, my-setup's claude-account): a session on account NAME (CLAUDE_ACCOUNT, set by
-# the wrapper; empty or "a" = the main account) shows its own account's file, quota_latest.NAME.json.
-account="${CLAUDE_ACCOUNT:-a}"
-case "$account" in *[!a-z0-9_-]*) account=a ;; esac
-if [ "$account" = a ]; then quota_file="$quota_dir/quota_latest.json"; else quota_file="$quota_dir/quota_latest.$account.json"; fi
+# the wrapper) shows its own account's file, quota_latest.NAME.json (one file per account since 2026-11-22). Without
+# CLAUDE_ACCOUNT (a session started outside the wrapper): the account with the most room left, room = 100 - max(5h %, 7d %)
+# (the wrapper's own rule; a tie: the first name; no file: a).
+account="${CLAUDE_ACCOUNT:-}"
+case "$account" in *[!a-z0-9_-]*) account="" ;; esac
+if [ -z "$account" ]; then
+    account="$(for room_file in "$quota_dir"/quota_latest.*.json; do
+        [ -r "$room_file" ] || continue
+        room_name="${room_file##*/quota_latest.}"; room_name="${room_name%.json}"
+        jq -r --argjson now "$(date '+%s')" --arg name "$room_name" '
+            def pct($w): if ($w | type) != "object" then 0
+                elif ($w.resets_at | type) == "number" and $w.resets_at <= $now then 0
+                else ($w.used_percentage // 0) end;
+            if type == "object" then "\(100 - ([pct(.five_hour), pct(.seven_day)] | max)) \($name)" else empty end' "$room_file" 2>/dev/null
+    done | sort -k1,1nr -k2,2 | head -n 1 | cut -d' ' -f2)"
+    account="${account:-a}"
+fi
+quota_file="$quota_dir/quota_latest.$account.json"
 
 now="$(date '+%s')"
 
@@ -78,7 +92,9 @@ fi
 
 model_display="$model"
 [ -n "$effort" ] && model_display="$model ($effort)"
-[ "$account" != a ] && model_display="$model_display [$account]"
+# The account's name after the model, whenever there is more than one account (one quota file per account).
+quota_files=("$quota_dir"/quota_latest.*.json)
+[ "${#quota_files[@]}" -ge 2 ] && [ -e "${quota_files[1]}" ] && model_display="$model_display [$account]"
 
 statusline_common_segments
 
@@ -93,14 +109,14 @@ printf '%s\n' "${STATUSLINE_GRAY_4}🆔 ${session_id}    ${resets_segment}    ${
 # Their quota_latest*.json sit beside ours; a window reads 0% once its reset has passed, as above; a file jq cannot read
 # is left out. Nothing is added when there is no other account.
 others_five=""; others_week=""
-others="$(for other_file in "$quota_dir"/quota_latest.json "$quota_dir"/quota_latest.*.json; do
+others="$(for other_file in "$quota_dir"/quota_latest.*.json; do
     [ -r "$other_file" ] && [ "$other_file" != "$quota_file" ] || continue
     jq -r --argjson now "$now" '
         def pct($w): if ($w | type) != "object" then 0
             elif ($w.resets_at | type) == "number" and $w.resets_at <= $now then 0
             else ($w.used_percentage // 0) end;
         if type == "object" then "\(pct(.five_hour)) \(pct(.seven_day))" else empty end' "$other_file" 2>/dev/null |
-        sed "s/^/$(basename "$other_file" .json | sed -e 's/^quota_latest\.*//' -e 's/^$/a/') /"
+        sed "s/^/$(basename "$other_file" .json | sed -e 's/^quota_latest\.//') /"
 done)"
 if [ -n "$others" ]; then
     read -r others_five others_week < <(printf '%s %s %s\n%s\n' "$account" "${five_pct:-0}" "${week_pct:-0}" "$others" | awk -v wf="$lib_dir/account_weights" '
