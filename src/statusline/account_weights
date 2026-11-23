@@ -1,4 +1,4 @@
 # Size of each Claude account, relative (Max 5x = 5, Pro = 1; both accounts on Max since 2026-11-20). Weighs the /y% of the other accounts; 1 when absent.
-# Edit in ~/dev/agent-statusline on the NAS, then run install.sh there and dev-install agent-statusline on the Mac.
+# Edit in ~/dev/agents/agent-statusline on the NAS, then run install.sh there and dev-install agent-statusline on the Mac.
 a 5
 b 5

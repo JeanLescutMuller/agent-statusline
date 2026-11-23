@@ -1,6 +1,6 @@
 # agent-statusline development instructions
 
-Development home: NAS (`~/dev/agent-statusline` on the NAS, since 2026-11-22; no copy on the Mac: `tm agent-statusline` opens it). Why (U19, the user, 2026-11-22): the NAS by default; its Mac parts are installed on the Mac from GitHub with one command: `dev-install agent-statusline` (my-setup).
+Development home: NAS (`~/dev/agents/agent-statusline` on the NAS, since 2026-11-22; no copy on the Mac: `tm agent-statusline` opens it). Why (U19, the user, 2026-11-22): the NAS by default; its Mac parts are installed on the Mac from GitHub with one command: `dev-install agent-statusline` (my-setup).
 
 These instructions govern development of this repository. User-facing usage,
 runtime layout, and the cache design are documented in `README.md` — this
@@ -63,7 +63,7 @@ can deliberately leave it alone - see its own header comment).
 Both are optional: absent, the statusline still renders.
 
 - `src/statusline/cache.sh`'s `statusline_read_host` shells out to `~/opt/my-setup/bin/get_host_color` for the deterministic per-host color (falls back to a default). Owned by `my-setup`.
-- **agent-tracker** (`~/dev/agent-tracker`, was `agent-usage-tracker`, split out of this repo on 2026-09-30 - git history before that is here, up to `d744951`). The contract is one file, specified in README.md's "agent-tracker" section: the Claude provider reads `$AGENT_TRACKER_HOME/data/claude/quota_latest.json` (default `~/opt/agent-tracker`) and shows it, after rule 8 (a passed `resets_at` is 0%). Since 2026-11-07 this repo is display only: no tracker script is run here and no heartbeat is written (before: the payload piped into `src/statusline_payload_reader.py`, and `state/heartbeat/*` mtimes). The chain `agent-tracker tick | bash ~/.claude/statusline-command.sh` is my-setup's `statusLine` setting, never this repo's. Rules that keep it clean:
+- **agent-tracker** (`~/dev/agents/agent-tracker`, was `agent-usage-tracker`, split out of this repo on 2026-09-30 - git history before that is here, up to `d744951`). The contract is one file, specified in README.md's "agent-tracker" section: the Claude provider reads `$AGENT_TRACKER_HOME/data/claude/quota_latest.json` (default `~/opt/agent-tracker`) and shows it, after rule 8 (a passed `resets_at` is 0%). Since 2026-11-07 this repo is display only: no tracker script is run here and no heartbeat is written (before: the payload piped into `src/statusline_payload_reader.py`, and `state/heartbeat/*` mtimes). The chain `agent-tracker tick | bash ~/.claude/statusline-command.sh` is my-setup's `statusLine` setting, never this repo's. Rules that keep it clean:
   - Only `providers/claude-statusline-command.sh` references the tracker (enforced by `tests/test_repo_hygiene.sh`), and this repo never writes into the tracker's tree.
   - Never call a tracker script from a render; never write a file for the tracker.
   - Never let the tracker break a render: a missing or unreadable file falls back to the session's own stdin reading, or `–`. The file is the only Claude quota this repo shows besides the session's own (no copy kept here).
